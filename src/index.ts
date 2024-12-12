@@ -1,78 +1,161 @@
 #!/usr/bin/env node
 
 import { execSync } from 'node:child_process';
-import fs from 'node:fs';
+import fs from 'node:fs/promises';
 import path from 'node:path';
-import * as readline from 'node:readline';
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { cpus } from 'node:os';
+import { Worker } from 'node:worker_threads';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import { Command } from 'commander';
-import { findUpSync } from 'find-up';
+import { findUp } from 'find-up';
 import { globby } from 'globby';
 import ora from 'ora';
 
-// Add interface for package.json structure
+// Update interface for package.json structure
 interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
   workspaces?: string[] | { packages: string[] };
 }
 
-// Enhanced package.json finder with monorepo support
-function findClosestPackageJson(startDirectory: string): string {
-  const packageJsonPath = findUpSync('package.json', { cwd: startDirectory });
+// Add interface for dependency context
+interface DependencyContext {
+  scripts?: Record<string, string>;
+  configs?: Record<string, any>;
+}
+
+// Enhanced package.json finder with improved monorepo support
+async function findClosestPackageJson(startDirectory: string): Promise<string> {
+  const packageJsonPath = await findUp('package.json', { cwd: startDirectory });
   if (!packageJsonPath) {
     console.error(chalk.red('No package.json found.'));
     process.exit(1);
   }
 
   // Check if this is part of a monorepo
-  const rootPackageJson = findUpSync('package.json', {
-    cwd: path.dirname(packageJsonPath),
-    stopAt: path.parse(packageJsonPath).root,
-  });
-
-  if (rootPackageJson && rootPackageJson !== packageJsonPath) {
-    const rootPkg = JSON.parse(fs.readFileSync(rootPackageJson, 'utf8')) as PackageJson;
-    if (rootPkg.workspaces) {
-      console.log(chalk.yellow('\nMonorepo detected. Using root package.json.'));
-      return rootPackageJson;
+  let currentDir = path.dirname(packageJsonPath);
+  while (true) {
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      break;
     }
+    const potentialRootPackageJson = path.join(parentDir, 'package.json');
+    try {
+      const rootPkgContent = await fs.readFile(potentialRootPackageJson, 'utf8');
+      const rootPkg = JSON.parse(rootPkgContent) as PackageJson;
+      if (rootPkg.workspaces) {
+        console.log(chalk.yellow('\nMonorepo detected. Using root package.json.'));
+        return potentialRootPackageJson;
+      }
+    } catch {
+      // No package.json found at this level
+    }
+    currentDir = parentDir;
   }
 
   return packageJsonPath;
 }
 
 // Function to read dependencies from package.json
-function getDependencies(packageJsonPath: string): string[] {
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-  };
-  const dependencies = packageJson.dependencies
-    ? Object.keys(packageJson.dependencies)
-    : [];
-  const devDependencies = packageJson.devDependencies
-    ? Object.keys(packageJson.devDependencies)
-    : [];
-  return [...dependencies, ...devDependencies];
+async function getDependencies(packageJsonPath: string): Promise<string[]> {
+  const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+  const packageJson = JSON.parse(packageJsonContent) as PackageJson;
+
+  const dependencies = packageJson.dependencies ? Object.keys(packageJson.dependencies) : [];
+  const devDependencies = packageJson.devDependencies ? Object.keys(packageJson.devDependencies) : [];
+  const peerDependencies = packageJson.peerDependencies ? Object.keys(packageJson.peerDependencies) : [];
+  const optionalDependencies = packageJson.optionalDependencies ? Object.keys(packageJson.optionalDependencies) : [];
+
+  return [...dependencies, ...devDependencies, ...peerDependencies, ...optionalDependencies];
 }
 
 // Function to collect all source files
-async function getSourceFiles(projectDirectory: string): Promise<string[]> {
+async function getSourceFiles(projectDirectory: string, ignorePatterns: string[] = []): Promise<string[]> {
   return await globby(['**/*.{js,jsx,ts,tsx}'], {
     cwd: projectDirectory,
     gitignore: true,
+    ignore: ['node_modules', 'dist', 'coverage', ...ignorePatterns],
     absolute: true,
   });
 }
 
+// Function to get package context
+async function getPackageContext(packageJsonPath: string): Promise<DependencyContext> {
+  const content = await fs.readFile(packageJsonPath, 'utf8');
+  const pkg = JSON.parse(content) as PackageJson;
+  const context: DependencyContext = { scripts: pkg.scripts };
+
+  // Check for common config files
+  const configFiles = [
+    'babel.config.js',
+    'jest.config.js',
+    'webpack.config.js',
+    '.eslintrc.js',
+    'rollup.config.js',
+  ];
+
+  const configs: Record<string, any> = {};
+  for (const file of configFiles) {
+    const configPath = path.join(path.dirname(packageJsonPath), file);
+    try {
+      if (await fs.access(configPath).then(() => true).catch(() => false)) {
+        const config = await import(configPath).catch(() => ({}));
+        configs[file] = config.default || config;
+      }
+    } catch {
+      // Ignore config load errors
+    }
+  }
+  context.configs = configs;
+
+  return context;
+}
+
 // Enhanced dependency detection
-function isDependencyUsedInFile(dependency: string, filePath: string): boolean {
-  const content = fs.readFileSync(filePath, 'utf8');
+async function isDependencyUsedInFile(
+  dependency: string,
+  filePath: string,
+  context: DependencyContext
+): Promise<boolean> {
+  // Check scripts first
+  if (context.scripts) {
+    for (const script of Object.values(context.scripts)) {
+      if (script.includes(dependency)) {
+        return true;
+      }
+    }
+  }
+
+  // Check configs
+  if (context.configs) {
+    for (const config of Object.values(context.configs)) {
+      if (
+        JSON.stringify(config).includes(dependency) ||
+        (typeof config === 'object' &&
+         config.dependencies?.includes?.(dependency))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // Continue with existing file content check
+  let content: string;
+  try {
+    content = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    console.error(chalk.red(`Error reading ${filePath}: ${(error as Error).message}`));
+    return false;
+  }
+
   let isUsed = false;
 
   try {
@@ -123,10 +206,9 @@ function isDependencyUsedInFile(dependency: string, filePath: string): boolean {
         else if (
           path.isImport() &&
           path.parentPath.isCallExpression() &&
-          'value' in path.parentPath.node.arguments[0] &&
-          (path.parentPath.node.arguments[0] as any).value &&
+          path.parentPath.node.arguments[0].type === 'StringLiteral' &&
+          path.parentPath.node.arguments[0].value &&
           (path.parentPath.node.arguments[0].value === dependency ||
-            typeof path.parentPath.node.arguments[0].value === 'string' &&
             path.parentPath.node.arguments[0].value.startsWith(`${dependency}/`))
         ) {
           isUsed = true;
@@ -141,11 +223,36 @@ function isDependencyUsedInFile(dependency: string, filePath: string): boolean {
   return isUsed;
 }
 
+// Parallel file processing
+async function processFilesInParallel(
+  files: string[],
+  dependency: string,
+  context: DependencyContext
+): Promise<string[]> {
+  const batchSize = Math.max(1, Math.min(cpus().length - 1, 4));
+  const batches = Array.from({ length: Math.ceil(files.length / batchSize) }, (_, i) =>
+    files.slice(i * batchSize, (i + 1) * batchSize)
+  );
+
+  const results = await Promise.all(
+    batches.map(async (batch) =>
+      Promise.all(
+        batch.map(async (file) => ({
+          file,
+          used: await isDependencyUsedInFile(dependency, file, context),
+        }))
+      )
+    )
+  );
+
+  return results.flat().filter((result) => result.used).map((result) => result.file);
+}
+
 // Add function to detect the package manager
-function detectPackageManager(projectDirectory: string): string {
-  if (fs.existsSync(path.join(projectDirectory, 'yarn.lock'))) {
+async function detectPackageManager(projectDirectory: string): Promise<string> {
+  if (await fs.access(path.join(projectDirectory, 'yarn.lock')).then(() => true).catch(() => false)) {
     return 'yarn';
-  } else if (fs.existsSync(path.join(projectDirectory, 'pnpm-lock.yaml'))) {
+  } else if (await fs.access(path.join(projectDirectory, 'pnpm-lock.yaml')).then(() => true).catch(() => false)) {
     return 'pnpm';
   } else {
     return 'npm';
@@ -164,9 +271,10 @@ async function main(): Promise<void> {
     .parse(process.argv);
 
   const options = program.opts();
-  const packageJsonPath = findClosestPackageJson(process.cwd());
+  const packageJsonPath = await findClosestPackageJson(process.cwd());
 
   const projectDirectory = path.dirname(packageJsonPath);
+  const context = await getPackageContext(packageJsonPath);
 
   console.log(chalk.bold('\nStale Deps Analysis'));
   console.log(
@@ -177,16 +285,14 @@ async function main(): Promise<void> {
 
   const spinner = ora('Analyzing dependencies...').start();
 
-  const dependencies = getDependencies(packageJsonPath);
-  const sourceFiles = await getSourceFiles(projectDirectory);
+  const dependencies = await getDependencies(packageJsonPath);
+  const sourceFiles = await getSourceFiles(projectDirectory, options.ignore || []);
 
   const unusedDependencies: string[] = [];
   const dependencyUsage: Record<string, string[]> = {};
 
   for (const dep of dependencies) {
-    const usageFiles = sourceFiles.filter((file) =>
-      isDependencyUsedInFile(dep, file),
-    );
+    const usageFiles = await processFilesInParallel(sourceFiles, dep, context);
     if (usageFiles.length === 0) {
       unusedDependencies.push(dep);
     }
@@ -220,46 +326,39 @@ async function main(): Promise<void> {
     }
 
     // Prompt to remove dependencies
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+    const rl = readline.createInterface({ input, output });
 
     // Detect package manager once
-    const packageManager = detectPackageManager(projectDirectory);
+    const packageManager = await detectPackageManager(projectDirectory);
 
-    rl.question(
-      chalk.blue('\nDo you want to remove these dependencies? (y/N) '),
-      (answer) => {
-        if (answer.toLowerCase() === 'y') {
-          // Build uninstall command
-          let uninstallCommand = '';
-          switch (packageManager) {
-            case 'npm': {
-              uninstallCommand = `npm uninstall ${unusedDependencies.join(' ')}`;
-              break;
-            }
-            case 'yarn': {
-              uninstallCommand = `yarn remove ${unusedDependencies.join(' ')}`;
-              break;
-            }
-            case 'pnpm': {
-              uninstallCommand = `pnpm remove ${unusedDependencies.join(' ')}`;
-              break;
-            }
-            // no default
-          }
-
-          execSync(uninstallCommand, {
-            stdio: 'inherit',
-            cwd: projectDirectory,
-          });
-        } else {
-          console.log(chalk.blue('\nNo changes made.'));
+    const answer = await rl.question(chalk.blue('\nDo you want to remove these dependencies? (y/N) '));
+    if (answer.toLowerCase() === 'y') {
+      // Build uninstall command
+      let uninstallCommand = '';
+      switch (packageManager) {
+        case 'npm': {
+          uninstallCommand = `npm uninstall ${unusedDependencies.join(' ')}`;
+          break;
         }
-        rl.close();
-      },
-    );
+        case 'yarn': {
+          uninstallCommand = `yarn remove ${unusedDependencies.join(' ')}`;
+          break;
+        }
+        case 'pnpm': {
+          uninstallCommand = `pnpm remove ${unusedDependencies.join(' ')}`;
+          break;
+        }
+        // no default
+      }
+
+      execSync(uninstallCommand, {
+        stdio: 'inherit',
+        cwd: projectDirectory,
+      });
+    } else {
+      console.log(chalk.blue('\nNo changes made.'));
+    }
+    rl.close();
   } else {
     console.log(chalk.green('No unused dependencies found.'));
   }
