@@ -16,6 +16,7 @@ import { Command } from 'commander';
 import { findUp } from 'find-up';
 import { globby } from 'globby';
 import ora from 'ora';
+import { isBinaryFileSync } from 'isbinaryfile';
 
 // Update interface for package.json structure
 interface PackageJson {
@@ -31,6 +32,35 @@ interface DependencyContext {
   scripts?: Record<string, string>;
   configs?: Record<string, any>;
 }
+
+// Add supported config file types
+const CONFIG_FILES = [
+  // JavaScript/TypeScript configs
+  'babel.config.js', 'babel.config.mjs', 'babel.config.ts',
+  'jest.config.js', 'jest.config.mjs', 'jest.config.ts',
+  'webpack.config.js', 'webpack.config.mjs', 'webpack.config.ts',
+  'rollup.config.js', 'rollup.config.mjs', 'rollup.config.ts',
+  '.eslintrc.js', '.eslintrc.cjs',
+  // JSON configs
+  'tsconfig.json', '.eslintrc.json', 'babel.config.json',
+  // YAML configs
+  '.eslintrc.yaml', '.eslintrc.yml',
+];
+
+// Add special package handlers
+const SPECIAL_PACKAGES = new Map([
+  ['webpack', (content: string) => content.includes('webpack.config')],
+  ['babel', (content: string) => content.includes('babel.config') || content.includes('.babelrc')],
+  ['eslint', (content: string) => content.includes('.eslintrc') || content.includes('eslint.config')],
+  ['jest', (content: string) => content.includes('jest.config') || content.includes('jest.setup')],
+  ['postcss', (content: string) => content.includes('postcss.config')],
+  ['tailwindcss', (content: string) => content.includes('tailwind.config')],
+  ['rollup', (content: string) => content.includes('rollup.config')],
+  ['prettier', (content: string) => content.includes('.prettierrc') || content.includes('prettier.config')],
+  ['tsconfig-paths', (content: string) => content.includes('tsconfig')],
+  ['type-fest', () => true], // Always consider used if found (type-only package)
+  ['@types/', () => true], // Always consider used if found (type definitions)
+]);
 
 // Enhanced package.json finder with improved monorepo support
 async function findClosestPackageJson(startDirectory: string): Promise<string> {
@@ -87,35 +117,36 @@ async function getSourceFiles(projectDirectory: string, ignorePatterns: string[]
   });
 }
 
-// Function to get package context
+// Enhanced package context retrieval
 async function getPackageContext(packageJsonPath: string): Promise<DependencyContext> {
   const content = await fs.readFile(packageJsonPath, 'utf8');
   const pkg = JSON.parse(content) as PackageJson;
   const context: DependencyContext = { scripts: pkg.scripts };
-
-  // Check for common config files
-  const configFiles = [
-    'babel.config.js',
-    'jest.config.js',
-    'webpack.config.js',
-    '.eslintrc.js',
-    'rollup.config.js',
-  ];
-
   const configs: Record<string, any> = {};
-  for (const file of configFiles) {
+
+  for (const file of CONFIG_FILES) {
     const configPath = path.join(path.dirname(packageJsonPath), file);
     try {
       if (await fs.access(configPath).then(() => true).catch(() => false)) {
-        const config = await import(configPath).catch(() => ({}));
-        configs[file] = config.default || config;
+        if (file.endsWith('.json')) {
+          const content = await fs.readFile(configPath, 'utf8');
+          configs[file] = JSON.parse(content);
+        } else if (file.endsWith('.yaml') || file.endsWith('.yml')) {
+          const yaml = await import('yaml').catch(() => null);
+          if (yaml) {
+            const content = await fs.readFile(configPath, 'utf8');
+            configs[file] = yaml.parse(content);
+          }
+        } else {
+          const config = await import(configPath).catch(() => ({}));
+          configs[file] = config.default || config;
+        }
       }
     } catch {
       // Ignore config load errors
     }
   }
   context.configs = configs;
-
   return context;
 }
 
@@ -125,6 +156,21 @@ async function isDependencyUsedInFile(
   filePath: string,
   context: DependencyContext
 ): Promise<boolean> {
+  // Check special packages first
+  for (const [pkg, checker] of SPECIAL_PACKAGES.entries()) {
+    if (dependency.startsWith(pkg)) {
+      // For type packages, check if the related package is used
+      if (dependency.startsWith('@types/')) {
+        const basePackage = dependency.slice(7);
+        if (basePackage === 'node') return true; // Always keep @types/node
+        // Check if the base package is in dependencies
+        const allDeps = Object.keys(context.configs?.['package.json'] || {});
+        if (allDeps.includes(basePackage)) return true;
+      }
+      return checker(await fs.readFile(filePath, 'utf8').catch(() => ''));
+    }
+  }
+
   // Check scripts first
   if (context.scripts) {
     for (const script of Object.values(context.scripts)) {
@@ -145,6 +191,11 @@ async function isDependencyUsedInFile(
         return true;
       }
     }
+  }
+
+  // Skip binary files
+  if (isBinaryFileSync(filePath)) {
+    return false;
   }
 
   // Continue with existing file content check
@@ -223,29 +274,47 @@ async function isDependencyUsedInFile(
   return isUsed;
 }
 
-// Parallel file processing
+// Improved parallel processing with better error handling
 async function processFilesInParallel(
   files: string[],
   dependency: string,
-  context: DependencyContext
+  context: DependencyContext,
+  onProgress?: (processed: number, total: number) => void
 ): Promise<string[]> {
-  const batchSize = Math.max(1, Math.min(cpus().length - 1, 4));
-  const batches = Array.from({ length: Math.ceil(files.length / batchSize) }, (_, i) =>
-    files.slice(i * batchSize, (i + 1) * batchSize)
-  );
+  const BATCH_SIZE = 100; // Process files in smaller batches to manage memory
+  const results: string[] = [];
+  let errors = 0;
 
-  const results = await Promise.all(
-    batches.map(async (batch) =>
-      Promise.all(
-        batch.map(async (file) => ({
-          file,
-          used: await isDependencyUsedInFile(dependency, file, context),
-        }))
-      )
-    )
-  );
+  for (let i = 0; i < files.length; i += BATCH_SIZE) {
+    const batch = files.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (file) => {
+        try {
+          const used = await isDependencyUsedInFile(dependency, file, context);
+          return used ? file : null;
+        } catch (error) {
+          errors++;
+          console.error(chalk.red(`Error processing ${file}: ${(error as Error).message}`));
+          return null;
+        }
+      })
+    );
 
-  return results.flat().filter((result) => result.used).map((result) => result.file);
+    results.push(
+      ...batchResults
+        .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
+        .map(r => r.value)
+        .filter((r): r is string => r !== null)
+    );
+
+    onProgress?.(Math.min(i + BATCH_SIZE, files.length), files.length);
+  }
+
+  if (errors > 0) {
+    console.warn(chalk.yellow(`\nWarning: ${errors} files had processing errors`));
+  }
+
+  return results;
 }
 
 // Add function to detect the package manager
@@ -283,7 +352,10 @@ async function main(): Promise<void> {
     )}\n`,
   );
 
-  const spinner = ora('Analyzing dependencies...').start();
+  const spinner = ora({
+    text: 'Analyzing dependencies...',
+    spinner: 'dots',
+  }).start();
 
   const dependencies = await getDependencies(packageJsonPath);
   const sourceFiles = await getSourceFiles(projectDirectory, options.ignore || []);
@@ -291,8 +363,19 @@ async function main(): Promise<void> {
   const unusedDependencies: string[] = [];
   const dependencyUsage: Record<string, string[]> = {};
 
+  let processedFiles = 0;
+  const totalFiles = dependencies.length * sourceFiles.length;
+
   for (const dep of dependencies) {
-    const usageFiles = await processFilesInParallel(sourceFiles, dep, context);
+    const usageFiles = await processFilesInParallel(
+      sourceFiles,
+      dep,
+      context,
+      (processed, total) => {
+        processedFiles += processed;
+        spinner.text = `Analyzing dependencies... ${Math.floor((processedFiles / totalFiles) * 100)}%`;
+      }
+    );
     if (usageFiles.length === 0) {
       unusedDependencies.push(dep);
     }
