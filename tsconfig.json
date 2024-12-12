@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "lib": [
+      "es6"
+    ],
+    "moduleResolution": "node",
+    "module": "CommonJS",
+    "target": "ES2020",
+    "sourceMap": false,
+    "allowJs": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": false,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": false,
+    "noImplicitAny": true,
+    "removeComments": true,
+    "preserveConstEnums": true,
+    "outDir": "dist",
+    "types": [
+      "jest",
+      "node"
+    ],
+    "paths": {
+      "./*.ts": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "index.d.ts",
+    "tests/**/*.ts",
+    "src/**/*.ts",
+    "jest.config.*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
