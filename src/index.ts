@@ -10,22 +10,45 @@ import traverse from '@babel/traverse';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import { Command } from 'commander';
-import findUp from 'find-up';
-import globby from 'globby';
+import { findUpSync } from 'find-up';
+import { globby } from 'globby';
+import ora from 'ora';
 
-// Update function to find the closest package.json, handling monorepos and nested structures
+// Add interface for package.json structure
+interface PackageJson {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  workspaces?: string[] | { packages: string[] };
+}
+
+// Enhanced package.json finder with monorepo support
 function findClosestPackageJson(startDirectory: string): string {
-  const packageJsonPath = findUp.sync('package.json', { cwd: startDirectory });
+  const packageJsonPath = findUpSync('package.json', { cwd: startDirectory });
   if (!packageJsonPath) {
-    console.log(chalk.red('No package.json found.'));
+    console.error(chalk.red('No package.json found.'));
     process.exit(1);
   }
+
+  // Check if this is part of a monorepo
+  const rootPackageJson = findUpSync('package.json', {
+    cwd: path.dirname(packageJsonPath),
+    stopAt: path.parse(packageJsonPath).root,
+  });
+
+  if (rootPackageJson && rootPackageJson !== packageJsonPath) {
+    const rootPkg = JSON.parse(fs.readFileSync(rootPackageJson, 'utf8')) as PackageJson;
+    if (rootPkg.workspaces) {
+      console.log(chalk.yellow('\nMonorepo detected. Using root package.json.'));
+      return rootPackageJson;
+    }
+  }
+
   return packageJsonPath;
 }
 
 // Function to read dependencies from package.json
 function getDependencies(packageJsonPath: string): string[] {
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath)) as {
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
@@ -39,15 +62,15 @@ function getDependencies(packageJsonPath: string): string[] {
 }
 
 // Function to collect all source files
-function getSourceFiles(projectDirectory: string): string[] {
-  return globby.sync(['**/*.{js,jsx,ts,tsx}'], {
+async function getSourceFiles(projectDirectory: string): Promise<string[]> {
+  return await globby(['**/*.{js,jsx,ts,tsx}'], {
     cwd: projectDirectory,
     gitignore: true,
     absolute: true,
   });
 }
 
-// Function to check if a dependency is used in a file by parsing import and require statements
+// Enhanced dependency detection
 function isDependencyUsedInFile(dependency: string, filePath: string): boolean {
   const content = fs.readFileSync(filePath, 'utf8');
   let isUsed = false;
@@ -58,34 +81,21 @@ function isDependencyUsedInFile(dependency: string, filePath: string): boolean {
       plugins: [
         'typescript',
         'jsx',
-        'dynamicImport',
-        'classProperties',
         'decorators-legacy',
+        'classProperties',
+        'dynamicImport',
+        'exportDefaultFrom',
+        'exportNamespaceFrom',
+        'importMeta',
       ],
     });
 
     traverse(ast, {
       enter(path) {
+        // Check import/export statements
         if (
           (path.isImportDeclaration() || path.isExportDeclaration()) &&
-          path.node.source?.value &&
-          (path.node.source.value === dependency ||
-            path.node.source.value.startsWith(`${dependency}/`))
-        ) {
-          isUsed = true;
-          path.stop();
-        } else if (
-          path.isCallExpression() &&
-          (path.node.callee.type === 'Import' ||
-            path.node.callee.name === 'require') &&
-          path.node.arguments[0]?.value &&
-          (path.node.arguments[0].value === dependency ||
-            path.node.arguments[0].value.startsWith(`${dependency}/`))
-        ) {
-          isUsed = true;
-          path.stop();
-        } else if (
-          path.isExportDeclaration() &&
+          'source' in path.node &&
           path.node.source?.value &&
           (path.node.source.value === dependency ||
             path.node.source.value.startsWith(`${dependency}/`))
@@ -93,10 +103,39 @@ function isDependencyUsedInFile(dependency: string, filePath: string): boolean {
           isUsed = true;
           path.stop();
         }
+        // Check require calls
+        else if (
+          path.isCallExpression() &&
+          (
+            path.node.callee.type === 'Import' ||
+            (path.node.callee.type === 'Identifier' && path.node.callee.name === 'require')
+          ) &&
+          path.node.arguments[0] &&
+          path.node.arguments[0].type === 'StringLiteral' &&
+          path.node.arguments[0].value &&
+          (path.node.arguments[0].value === dependency ||
+            path.node.arguments[0].value.startsWith(`${dependency}/`))
+        ) {
+          isUsed = true;
+          path.stop();
+        }
+        // Check dynamic imports
+        else if (
+          path.isImport() &&
+          path.parentPath.isCallExpression() &&
+          'value' in path.parentPath.node.arguments[0] &&
+          (path.parentPath.node.arguments[0] as any).value &&
+          (path.parentPath.node.arguments[0].value === dependency ||
+            typeof path.parentPath.node.arguments[0].value === 'string' &&
+            path.parentPath.node.arguments[0].value.startsWith(`${dependency}/`))
+        ) {
+          isUsed = true;
+          path.stop();
+        }
       },
     });
   } catch (error) {
-    console.error(chalk.red(`Error parsing ${filePath}: ${error.message}`));
+    console.error(chalk.red(`Error parsing ${filePath}: ${(error as Error).message}`));
   }
 
   return isUsed;
@@ -114,13 +153,14 @@ function detectPackageManager(projectDirectory: string): string {
 }
 
 // Main execution
-function main(): void {
+async function main(): Promise<void> {
   const program = new Command();
 
   program
     .version('1.0.0')
     .description('CLI tool that identifies and removes unused npm dependencies')
     .option('-v, --verbose', 'display detailed usage information')
+    .option('-i, --ignore <patterns...>', 'patterns to ignore')
     .parse(process.argv);
 
   const options = program.opts();
@@ -135,8 +175,10 @@ function main(): void {
     )}\n`,
   );
 
+  const spinner = ora('Analyzing dependencies...').start();
+
   const dependencies = getDependencies(packageJsonPath);
-  const sourceFiles = getSourceFiles(projectDirectory);
+  const sourceFiles = await getSourceFiles(projectDirectory);
 
   const unusedDependencies: string[] = [];
   const dependencyUsage: Record<string, string[]> = {};
@@ -150,6 +192,8 @@ function main(): void {
     }
     dependencyUsage[dep] = usageFiles;
   }
+
+  spinner.succeed('Analysis complete!');
 
   if (options.verbose) {
     const table = new Table({
