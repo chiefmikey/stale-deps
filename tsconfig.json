@@ -20,18 +20,19 @@
     "outDir": "dist",
     "declaration": true,
     "types": [
-      "jest",
-      "node"
+      "node",
+      "jest"
     ],
     "paths": {
-      "./*.ts": [
-        "./*"
+      "@/*": [
+        "src/*"
       ]
-    }
+    },
+    "baseUrl": "."
   },
   "include": [
-    "tests/**/*.ts",
     "src/**/*.ts",
+    "src/**/*.test.ts",
     "jest.config.*"
   ],
   "exclude": [
