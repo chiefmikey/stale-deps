@@ -45,9 +45,9 @@ Options:
   -v, --verbose          Display detailed usage information
   -i, --ignore <paths>   Patterns to ignore
   --safe                 Prevent removing essential packages
-  --dry-run             Show what would be removed without making changes
-  --no-progress         Disable progress bar
-  -h, --help            Display help information
+  --dry-run              Show what would be removed without making changes
+  --no-progress          Disable progress bar
+  -h, --help             Display help information
 ```
 
 ### Examples
