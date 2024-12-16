@@ -7,6 +7,7 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { cpus } from 'node:os';
 import { Worker } from 'node:worker_threads';
+import v8 from 'node:v8';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
@@ -17,6 +18,9 @@ import { findUp } from 'find-up';
 import { globby } from 'globby';
 import ora from 'ora';
 import { isBinaryFileSync } from 'isbinaryfile';
+import cliProgress from 'cli-progress';
+import retry from 'async-retry';
+import micromatch from 'micromatch';
 
 // Update interface for package.json structure
 interface PackageJson {
@@ -33,6 +37,21 @@ interface DependencyContext {
   configs?: Record<string, any>;
 }
 
+// Add interface for workspace info
+interface WorkspaceInfo {
+  root: string;
+  packages: string[];
+}
+
+// Add essential packages that should never be removed
+const ESSENTIAL_PACKAGES = new Set([
+  'typescript',
+  '@types/node',
+  'tslib',
+  'prettier',
+  'eslint'
+]);
+
 // Add supported config file types
 const CONFIG_FILES = [
   // JavaScript/TypeScript configs
@@ -45,6 +64,14 @@ const CONFIG_FILES = [
   'tsconfig.json', '.eslintrc.json', 'babel.config.json',
   // YAML configs
   '.eslintrc.yaml', '.eslintrc.yml',
+  // Modern framework configs
+  'vite.config.ts',
+  'next.config.mjs',
+  'astro.config.mjs',
+  'remix.config.js',
+  'svelte.config.js',
+  'vue.config.js',
+  'nuxt.config.ts',
 ];
 
 // Add special package handlers
@@ -61,6 +88,50 @@ const SPECIAL_PACKAGES = new Map([
   ['type-fest', () => true], // Always consider used if found (type-only package)
   ['@types/', () => true], // Always consider used if found (type definitions)
 ]);
+
+// Add raw content patterns
+const RAW_CONTENT_PATTERNS = new Map([
+  ['webpack', ['webpack.*', 'webpack-*']],
+  ['babel', ['babel.*', '@babel/*']],
+  ['eslint', ['eslint.*', '@eslint/*']],
+  ['jest', ['jest.*', '@jest/*']],
+  ['typescript', ['ts-*', '@typescript-*']],
+  ['rollup', ['rollup.*', 'rollup-*']],
+  ['esbuild', ['esbuild.*', '@esbuild/*']],
+  ['vite', ['vite.*', '@vitejs/*']],
+  ['next', ['next.*', '@next/*']],
+  ['vue', ['vue.*', '@vue/*', '@nuxt/*']],
+  ['react', ['react.*', '@types/react*']],
+  ['svelte', ['svelte.*', '@sveltejs/*']],
+]);
+
+// Add workspace detection
+async function getWorkspaceInfo(packageJsonPath: string): Promise<WorkspaceInfo | null> {
+  try {
+    const content = await fs.readFile(packageJsonPath, 'utf8');
+    const pkg = JSON.parse(content) as PackageJson;
+
+    if (!pkg.workspaces) return null;
+
+    const patterns = Array.isArray(pkg.workspaces)
+      ? pkg.workspaces
+      : pkg.workspaces.packages || [];
+
+    const packagePaths = await globby(patterns, {
+      cwd: path.dirname(packageJsonPath),
+      onlyDirectories: true,
+      expandDirectories: false,
+      ignore: ['node_modules'],
+    });
+
+    return {
+      root: packageJsonPath,
+      packages: packagePaths,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Enhanced package.json finder with improved monorepo support
 async function findClosestPackageJson(startDirectory: string): Promise<string> {
@@ -87,6 +158,20 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
       }
     } catch {
       // No package.json found at this level
+    }
+    const workspaceInfo = await getWorkspaceInfo(potentialRootPackageJson);
+
+    if (workspaceInfo) {
+      const relativePath = path.relative(path.dirname(workspaceInfo.root), packageJsonPath);
+      const isWorkspacePackage = workspaceInfo.packages.some(p =>
+        relativePath.startsWith(p) || p.startsWith(relativePath)
+      );
+
+      if (isWorkspacePackage) {
+        console.log(chalk.yellow('\nMonorepo workspace package detected.'));
+        console.log(chalk.yellow(`Root: ${workspaceInfo.root}`));
+        return packageJsonPath; // Analyze the workspace package
+      }
     }
     currentDir = parentDir;
   }
@@ -150,12 +235,35 @@ async function getPackageContext(packageJsonPath: string): Promise<DependencyCon
   return context;
 }
 
+// Add function to safely retry file operations
+async function safeFileOp<T>(operation: () => Promise<T>, filepath: string): Promise<T> {
+  return retry(
+    async (bail) => {
+      try {
+        return await operation();
+      } catch (error) {
+        if ((error as Error).message.includes('ENOENT')) {
+          bail(error as Error);
+          return undefined as T;
+        }
+        throw error;
+      }
+    },
+    { retries: 3 }
+  );
+}
+
 // Enhanced dependency detection
 async function isDependencyUsedInFile(
   dependency: string,
   filePath: string,
   context: DependencyContext
 ): Promise<boolean> {
+  // Check essential packages first
+  if (ESSENTIAL_PACKAGES.has(dependency)) {
+    return true;
+  }
+
   // Check special packages first
   for (const [pkg, checker] of SPECIAL_PACKAGES.entries()) {
     if (dependency.startsWith(pkg)) {
@@ -271,17 +379,44 @@ async function isDependencyUsedInFile(
     console.error(chalk.red(`Error parsing ${filePath}: ${(error as Error).message}`));
   }
 
+  // Add raw content pattern matching
+  for (const [base, patterns] of RAW_CONTENT_PATTERNS.entries()) {
+    if (dependency.startsWith(base)) {
+      if (patterns.some(pattern => micromatch.isMatch(dependency, pattern))) {
+        // Check content for any variation of the package name
+        const searchPattern = base.replace(/[@/-]/g, '.');
+        if (new RegExp(searchPattern, 'i').test(content)) {
+          return true;
+        }
+      }
+    }
+  }
+
   return isUsed;
 }
 
-// Improved parallel processing with better error handling
+// Add memory check function
+function getMemoryUsage(): { used: number; total: number } {
+  const heapStats = v8.getHeapStatistics();
+  return {
+    used: heapStats.used_heap_size,
+    total: heapStats.heap_size_limit,
+  };
+}
+
+// Enhanced parallel processing with memory management
 async function processFilesInParallel(
   files: string[],
   dependency: string,
   context: DependencyContext,
   onProgress?: (processed: number, total: number) => void
 ): Promise<string[]> {
-  const BATCH_SIZE = 100; // Process files in smaller batches to manage memory
+  const { total: maxMemory } = getMemoryUsage();
+  const BATCH_SIZE = Math.min(
+    100,
+    Math.max(10, Math.floor(maxMemory / (1024 * 1024 * 50))) // 50MB per batch
+  );
+
   const results: string[] = [];
   let errors = 0;
 
@@ -330,120 +465,160 @@ async function detectPackageManager(projectDirectory: string): Promise<string> {
 
 // Main execution
 async function main(): Promise<void> {
-  const program = new Command();
+  try {
+    const program = new Command();
 
-  program
-    .version('1.0.0')
-    .description('CLI tool that identifies and removes unused npm dependencies')
-    .option('-v, --verbose', 'display detailed usage information')
-    .option('-i, --ignore <patterns...>', 'patterns to ignore')
-    .parse(process.argv);
+    program
+      .version('1.0.0')
+      .description('CLI tool that identifies and removes unused npm dependencies')
+      .option('-v, --verbose', 'display detailed usage information')
+      .option('-i, --ignore <patterns...>', 'patterns to ignore')
+      .option('--safe', 'prevent removing essential packages')
+      .option('--dry-run', 'show what would be removed without making changes')
+      .option('--no-progress', 'disable progress bar')
+      .parse(process.argv);
 
-  const options = program.opts();
-  const packageJsonPath = await findClosestPackageJson(process.cwd());
+    const options = program.opts();
+    const packageJsonPath = await findClosestPackageJson(process.cwd());
 
-  const projectDirectory = path.dirname(packageJsonPath);
-  const context = await getPackageContext(packageJsonPath);
+    const projectDirectory = path.dirname(packageJsonPath);
+    const context = await getPackageContext(packageJsonPath);
 
-  console.log(chalk.bold('\nStale Deps Analysis'));
-  console.log(
-    `Package.json found at: ${chalk.green(
-      path.relative(process.cwd(), packageJsonPath),
-    )}\n`,
-  );
-
-  const spinner = ora({
-    text: 'Analyzing dependencies...',
-    spinner: 'dots',
-  }).start();
-
-  const dependencies = await getDependencies(packageJsonPath);
-  const sourceFiles = await getSourceFiles(projectDirectory, options.ignore || []);
-
-  const unusedDependencies: string[] = [];
-  const dependencyUsage: Record<string, string[]> = {};
-
-  let processedFiles = 0;
-  const totalFiles = dependencies.length * sourceFiles.length;
-
-  for (const dep of dependencies) {
-    const usageFiles = await processFilesInParallel(
-      sourceFiles,
-      dep,
-      context,
-      (processed, total) => {
-        processedFiles += processed;
-        spinner.text = `Analyzing dependencies... ${Math.floor((processedFiles / totalFiles) * 100)}%`;
-      }
+    console.log(chalk.bold('\nStale Deps Analysis'));
+    console.log(
+      `Package.json found at: ${chalk.green(
+        path.relative(process.cwd(), packageJsonPath),
+      )}\n`,
     );
-    if (usageFiles.length === 0) {
-      unusedDependencies.push(dep);
-    }
-    dependencyUsage[dep] = usageFiles;
-  }
 
-  spinner.succeed('Analysis complete!');
+    const spinner = ora({
+      text: 'Analyzing dependencies...',
+      spinner: 'dots',
+    }).start();
 
-  if (options.verbose) {
-    const table = new Table({
-      head: ['Dependency', 'Usage'],
-      wordWrap: true,
-      colWidths: [30, 70],
+    process.on('uncaughtException', (error) => {
+      spinner.fail('Analysis failed');
+      console.error(chalk.red('\nFatal error:'), error);
+      process.exit(1);
     });
 
+    process.on('unhandledRejection', (error) => {
+      spinner.fail('Analysis failed');
+      console.error(chalk.red('\nFatal error:'), error);
+      process.exit(1);
+    });
+
+    const dependencies = await getDependencies(packageJsonPath);
+    const sourceFiles = await getSourceFiles(projectDirectory, options.ignore || []);
+
+    const unusedDependencies: string[] = [];
+    const dependencyUsage: Record<string, string[]> = {};
+
+    let processedFiles = 0;
+    const totalFiles = dependencies.length * sourceFiles.length;
+
+    const progressBar = new cliProgress.SingleBar({
+      format: 'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+    });
+
+    if (!program.opts().noProgress) {
+      progressBar.start(totalFiles, 0);
+    }
+
     for (const dep of dependencies) {
-      const usage = dependencyUsage[dep];
-      table.push([
+      const usageFiles = await processFilesInParallel(
+        sourceFiles,
         dep,
-        usage.length > 0
-          ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
-          : chalk.yellow('Not used'),
-      ]);
+        context,
+        (processed) => {
+          progressBar.update(processedFiles + processed);
+        }
+      );
+      if (usageFiles.length === 0) {
+        unusedDependencies.push(dep);
+      }
+      dependencyUsage[dep] = usageFiles;
     }
 
-    console.log(table.toString());
-  } else if (unusedDependencies.length > 0) {
-    console.log(chalk.bold('Unused dependencies found:\n'));
-    for (const dep of unusedDependencies) {
-      console.log(chalk.yellow(`- ${dep}`));
+    progressBar.stop();
+    spinner.succeed('Analysis complete!');
+
+    // Filter out essential packages if in safe mode
+    if (program.opts().safe) {
+      unusedDependencies = unusedDependencies.filter(dep => !ESSENTIAL_PACKAGES.has(dep));
     }
 
-    // Prompt to remove dependencies
-    const rl = readline.createInterface({ input, output });
+    if (options.verbose) {
+      const table = new Table({
+        head: ['Dependency', 'Usage'],
+        wordWrap: true,
+        colWidths: [30, 70],
+      });
 
-    // Detect package manager once
-    const packageManager = await detectPackageManager(projectDirectory);
-
-    const answer = await rl.question(chalk.blue('\nDo you want to remove these dependencies? (y/N) '));
-    if (answer.toLowerCase() === 'y') {
-      // Build uninstall command
-      let uninstallCommand = '';
-      switch (packageManager) {
-        case 'npm': {
-          uninstallCommand = `npm uninstall ${unusedDependencies.join(' ')}`;
-          break;
-        }
-        case 'yarn': {
-          uninstallCommand = `yarn remove ${unusedDependencies.join(' ')}`;
-          break;
-        }
-        case 'pnpm': {
-          uninstallCommand = `pnpm remove ${unusedDependencies.join(' ')}`;
-          break;
-        }
-        // no default
+      for (const dep of dependencies) {
+        const usage = dependencyUsage[dep];
+        table.push([
+          dep,
+          usage.length > 0
+            ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
+            : chalk.yellow('Not used'),
+        ]);
       }
 
-      execSync(uninstallCommand, {
-        stdio: 'inherit',
-        cwd: projectDirectory,
-      });
+      console.log(table.toString());
+    } else if (unusedDependencies.length > 0) {
+      console.log(chalk.bold('Unused dependencies found:\n'));
+      for (const dep of unusedDependencies) {
+        console.log(chalk.yellow(`- ${dep}`));
+      }
+
+      if (program.opts().dryRun) {
+        console.log(chalk.blue('\nDry run - no changes made'));
+        return;
+      }
+
+      // Prompt to remove dependencies
+      const rl = readline.createInterface({ input, output });
+
+      // Detect package manager once
+      const packageManager = await detectPackageManager(projectDirectory);
+
+      const answer = await rl.question(chalk.blue('\nDo you want to remove these dependencies? (y/N) '));
+      if (answer.toLowerCase() === 'y') {
+        // Build uninstall command
+        let uninstallCommand = '';
+        switch (packageManager) {
+          case 'npm': {
+            uninstallCommand = `npm uninstall ${unusedDependencies.join(' ')}`;
+            break;
+          }
+          case 'yarn': {
+            uninstallCommand = `yarn remove ${unusedDependencies.join(' ')}`;
+            break;
+          }
+          case 'pnpm': {
+            uninstallCommand = `pnpm remove ${unusedDependencies.join(' ')}`;
+            break;
+          }
+          // no default
+        }
+
+        execSync(uninstallCommand, {
+          stdio: 'inherit',
+          cwd: projectDirectory,
+        });
+      } else {
+        console.log(chalk.blue('\nNo changes made.'));
+      }
+      rl.close();
     } else {
-      console.log(chalk.blue('\nNo changes made.'));
+      console.log(chalk.green('No unused dependencies found.'));
     }
-    rl.close();
-  } else {
-    console.log(chalk.green('No unused dependencies found.'));
+  } catch (error) {
+    console.error(chalk.red('\nFatal error:'), error);
+    process.exit(1);
   }
 }
 
