@@ -1,120 +1,95 @@
-# eslint-plugin-disable-autofix
+# stale-deps 🧹
 
-Disable autofix for ESLint rules and prevent them from being formatted without
-having to turn them off.
+> Intelligent dependency cleanup for JavaScript/TypeScript projects
+
+[![npm version](https://img.shields.io/npm/v/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
+[![Downloads](https://img.shields.io/npm/dm/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
+[![License](https://img.shields.io/npm/l/stale-deps.svg)](https://github.com/chiefmikey/stale-deps/blob/main/LICENSE)
+
+Automatically detect and remove unused dependencies in your JavaScript and TypeScript projects with confidence.
+
+## Features
+
+- 🔍 Smart detection of unused dependencies
+- 🎯 Precise AST-based analysis
+- 🚀 Support for modern JS/TS features
+- 📦 Works with npm, yarn, and pnpm
+- 🛡️ Safe mode to protect essential packages
+- 🏗️ Monorepo support
+
+## Installation
+
+```bash
+# Using npm
+npm install -g stale-deps
+
+# Using yarn
+yarn global add stale-deps
+
+# Using pnpm
+pnpm add -g stale-deps
+```
 
 ## Usage
 
-### Install
+Run in your project directory:
 
-```sh
-npm i -D eslint-plugin-disable-autofix
+```bash
+stale-deps
 ```
 
-### Configure
+### Options
 
-Import and include `disable-autofix` in the `plugins` object
-
-Add prefix `disable-autofix/` to the rule and disable the original
-
-```ts
-import disableAutofix from 'eslint-plugin-disable-autofix';
-
-export default [
-  {
-    plugins: {
-      'disable-autofix': disableAutofix,
-    },
-    rules: {
-      'prefer-const': 'off',
-      'disable-autofix/prefer-const': 'warn',
-    },
-  },
-];
+```
+Options:
+  -v, --verbose          Display detailed usage information
+  -i, --ignore <paths>   Patterns to ignore
+  --safe                 Prevent removing essential packages
+  --dry-run             Show what would be removed without making changes
+  --no-progress         Disable progress bar
+  -h, --help            Display help information
 ```
 
-Using 3rd-party Rules
+### Examples
 
-```ts
-import disableAutofix from 'eslint-plugin-disable-autofix';
-import react from 'eslint-plugin-react';
+```bash
+# Run with verbose output
+stale-deps --verbose
 
-export default [
-  {
-    plugins: {
-      'disable-autofix': disableAutofix,
-      react,
-    },
-    rules: {
-      'react/jsx-indent': 'off',
-      'disable-autofix/react/jsx-indent': 'error',
-    },
-  },
-];
+# Run in safe mode
+stale-deps --safe
+
+# Ignore specific patterns
+stale-deps -i "test/**" "scripts/**"
+
+# Preview changes without removing
+stale-deps --dry-run
 ```
 
-Using Scoped Rules
+## How It Works
 
-```ts
-import disableAutofix from 'eslint-plugin-disable-autofix';
-import htmlEslint from '@html-eslint/eslint-plugin';
+stale-deps performs:
 
-export default [
-  {
-    plugins: {
-      'disable-autofix': disableAutofix,
-      '@html-eslint': htmlEslint,
-    },
-    rules: {
-      '@html-eslint/require-closing-tags': 'off',
-      'disable-autofix/@html-eslint/require-closing-tags': [
-        'error',
-        { selfClosing: 'always' },
-      ],
-    },
-  },
-];
-```
+1. Deep dependency analysis using AST parsing
+2. Smart detection of imports and requires
+3. Configuration file scanning
+4. Special package handling
+5. Memory-efficient parallel processing
 
-### Configure Legacy
+## Supported Features
 
-Include `disable-autofix` in the `eslintrc` plugins array
+- ✅ ES Modules and CommonJS
+- ✅ TypeScript and JSX
+- ✅ Dynamic imports
+- ✅ Config file dependencies
+- ✅ Workspace packages
+- ✅ Binary file detection
+- ✅ Essential package protection
 
-Add prefix `disable-autofix/` to the rule and disable the original
+## Contributing
 
-```js
-module.exports = {
-  plugins: ['disable-autofix'],
-  rules: {
-    'prefer-const': 'off',
-    'disable-autofix/prefer-const': 'warn',
-  },
-};
-```
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-Using 3rd-party Rules
+## License
 
-```js
-module.exports = {
-  plugins: ['disable-autofix', 'react'],
-  rules: {
-    'react/jsx-indent': 'off',
-    'disable-autofix/react/jsx-indent': 'error',
-  },
-};
-```
-
-Using Scoped Rules
-
-```js
-module.exports = {
-  plugins: ['disable-autofix', '@html-eslint'],
-  rules: {
-    '@html-eslint/require-closing-tags': 'off',
-    'disable-autofix/@html-eslint/require-closing-tags': [
-      'error',
-      { selfClosing: 'always' },
-    ],
-  },
-};
-```
+MIT © [chiefmikey](https://github.com/chiefmikey)
