@@ -9,10 +9,9 @@ import v8 from 'node:v8';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
-import retry from 'async-retry';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
-import Table from 'cli-table3';
+import CliTable from 'cli-table3';
 import { Command } from 'commander';
 import { findUp } from 'find-up';
 import { globby } from 'globby';
@@ -27,6 +26,7 @@ interface PackageJson {
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   workspaces?: string[] | { packages: string[] };
+  scripts?: Record<string, string>;
 }
 
 // Add interface for dependency context
@@ -85,34 +85,40 @@ const CONFIG_FILES = [
 ];
 
 // Add special package handlers
-const SPECIAL_PACKAGES = new Map([
-  ['webpack', (content: string) => content.includes('webpack.config')],
+const SPECIAL_PACKAGES = new Map<string, (content: string) => boolean>([
+  ['webpack', (content: string): boolean => content.includes('webpack.config')],
   [
     'babel',
-    (content: string) =>
+    (content: string): boolean =>
       content.includes('babel.config') || content.includes('.babelrc'),
   ],
   [
     'eslint',
-    (content: string) =>
+    (content: string): boolean =>
       content.includes('.eslintrc') || content.includes('eslint.config'),
   ],
   [
     'jest',
-    (content: string) =>
+    (content: string): boolean =>
       content.includes('jest.config') || content.includes('jest.setup'),
   ],
-  ['postcss', (content: string) => content.includes('postcss.config')],
-  ['tailwindcss', (content: string) => content.includes('tailwind.config')],
-  ['rollup', (content: string) => content.includes('rollup.config')],
+  ['postcss', (content: string): boolean => content.includes('postcss.config')],
+  [
+    'tailwindcss',
+    (content: string): boolean => content.includes('tailwind.config'),
+  ],
+  ['rollup', (content: string): boolean => content.includes('rollup.config')],
   [
     'prettier',
-    (content: string) =>
+    (content: string): boolean =>
       content.includes('.prettierrc') || content.includes('prettier.config'),
   ],
-  ['tsconfig-paths', (content: string) => content.includes('tsconfig')],
-  ['type-fest', () => true], // Always consider used if found (type-only package)
-  ['@types/', () => true], // Always consider used if found (type definitions)
+  [
+    'tsconfig-paths',
+    (content: string): boolean => content.includes('tsconfig'),
+  ],
+  ['type-fest', (): boolean => true], // Always consider used if found (type-only package)
+  ['@types/', (): boolean => true], // Always consider used if found (type definitions)
 ]);
 
 // Add raw content patterns
@@ -134,12 +140,12 @@ const RAW_CONTENT_PATTERNS = new Map([
 // Add workspace detection
 async function getWorkspaceInfo(
   packageJsonPath: string,
-): Promise<WorkspaceInfo | null> {
+): Promise<WorkspaceInfo | undefined> {
   try {
-    const content = await fs.readFile(packageJsonPath);
-    const package_ = JSON.parse(content) as PackageJson;
+    const buffer = await fs.readFile(packageJsonPath);
+    const package_ = JSON.parse(buffer.toString()) as PackageJson;
 
-    if (!package_.workspaces) return null;
+    if (!package_.workspaces) return undefined;
 
     const patterns = Array.isArray(package_.workspaces)
       ? package_.workspaces
@@ -157,7 +163,7 @@ async function getWorkspaceInfo(
       packages: packagePaths,
     };
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -170,16 +176,18 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
   }
 
   // Check if this is part of a monorepo
-  let currentDir = path.dirname(packageJsonPath);
+  let currentDirectory = path.dirname(packageJsonPath);
   while (true) {
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
+    const parentDirectory = path.dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
       break;
     }
-    const potentialRootPackageJson = path.join(parentDir, 'package.json');
+    const potentialRootPackageJson = path.join(parentDirectory, 'package.json');
     try {
-      const rootPackageContent = await fs.readFile(potentialRootPackageJson);
-      const rootPackage = JSON.parse(rootPackageContent) as PackageJson;
+      const rootPackageBuffer = await fs.readFile(potentialRootPackageJson);
+      const rootPackage = JSON.parse(
+        rootPackageBuffer.toString(),
+      ) as PackageJson;
       if (rootPackage.workspaces) {
         console.log(
           chalk.yellow('\nMonorepo detected. Using root package.json.'),
@@ -206,7 +214,7 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
         return packageJsonPath; // Analyze the workspace package
       }
     }
-    currentDir = parentDir;
+    currentDirectory = parentDirectory;
   }
 
   return packageJsonPath;
@@ -214,8 +222,8 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
 
 // Function to read dependencies from package.json
 async function getDependencies(packageJsonPath: string): Promise<string[]> {
-  const packageJsonContent = await fs.readFile(packageJsonPath);
-  const packageJson = JSON.parse(packageJsonContent) as PackageJson;
+  const packageJsonBuffer = await fs.readFile(packageJsonPath);
+  const packageJson = JSON.parse(packageJsonBuffer.toString()) as PackageJson;
 
   const dependencies = packageJson.dependencies
     ? Object.keys(packageJson.dependencies)
@@ -255,8 +263,8 @@ async function getSourceFiles(
 async function getPackageContext(
   packageJsonPath: string,
 ): Promise<DependencyContext> {
-  const content = await fs.readFile(packageJsonPath);
-  const package_ = JSON.parse(content) as PackageJson;
+  const buffer = await fs.readFile(packageJsonPath);
+  const package_ = JSON.parse(buffer.toString()) as PackageJson;
   const context: DependencyContext = { scripts: package_.scripts };
   const configs: Record<string, any> = {};
 
@@ -270,8 +278,8 @@ async function getPackageContext(
           .catch(() => false)
       ) {
         if (file.endsWith('.json')) {
-          const content = await fs.readFile(configPath);
-          configs[file] = JSON.parse(content);
+          const contentBuffer = await fs.readFile(configPath);
+          configs[file] = JSON.parse(contentBuffer.toString());
         } else if (file.endsWith('.yaml') || file.endsWith('.yml')) {
           const yaml = await import('yaml').catch(() => null);
           if (yaml) {
@@ -289,27 +297,6 @@ async function getPackageContext(
   }
   context.configs = configs;
   return context;
-}
-
-// Add function to safely retry file operations
-async function safeFileOp<T>(
-  operation: () => Promise<T>,
-  filepath: string,
-): Promise<T> {
-  return retry(
-    async (bail) => {
-      try {
-        return await operation();
-      } catch (error) {
-        if ((error as Error).message.includes('ENOENT')) {
-          bail(error as Error);
-          return undefined as T;
-        }
-        throw error;
-      }
-    },
-    { retries: 3 },
-  );
 }
 
 // Enhanced dependency detection
@@ -394,46 +381,46 @@ async function isDependencyUsedInFile(
     });
 
     traverse(ast, {
-      enter(path) {
+      enter(astPath): void {
         // Check import/export statements
         if (
-          (path.isImportDeclaration() || path.isExportDeclaration()) &&
-          'source' in path.node &&
-          path.node.source?.value &&
-          (path.node.source.value === dependency ||
-            path.node.source.value.startsWith(`${dependency}/`))
+          (astPath.isImportDeclaration() || astPath.isExportDeclaration()) &&
+          'source' in astPath.node &&
+          astPath.node.source?.value &&
+          (astPath.node.source.value === dependency ||
+            astPath.node.source.value.startsWith(`${dependency}/`))
         ) {
           isUsed = true;
-          path.stop();
+          astPath.stop();
         }
         // Check require calls
         else if (
-          path.isCallExpression() &&
-          (path.node.callee.type === 'Import' ||
-            (path.node.callee.type === 'Identifier' &&
-              path.node.callee.name === 'require')) &&
-          path.node.arguments[0] &&
-          path.node.arguments[0].type === 'StringLiteral' &&
-          path.node.arguments[0].value &&
-          (path.node.arguments[0].value === dependency ||
-            path.node.arguments[0].value.startsWith(`${dependency}/`))
+          astPath.isCallExpression() &&
+          (astPath.node.callee.type === 'Import' ||
+            (astPath.node.callee.type === 'Identifier' &&
+              astPath.node.callee.name === 'require')) &&
+          astPath.node.arguments[0] &&
+          astPath.node.arguments[0].type === 'StringLiteral' &&
+          astPath.node.arguments[0].value &&
+          (astPath.node.arguments[0].value === dependency ||
+            astPath.node.arguments[0].value.startsWith(`${dependency}/`))
         ) {
           isUsed = true;
-          path.stop();
+          astPath.stop();
         }
         // Check dynamic imports
         else if (
-          path.isImport() &&
-          path.parentPath.isCallExpression() &&
-          path.parentPath.node.arguments[0].type === 'StringLiteral' &&
-          path.parentPath.node.arguments[0].value &&
-          (path.parentPath.node.arguments[0].value === dependency ||
-            path.parentPath.node.arguments[0].value.startsWith(
+          astPath.isImport() &&
+          astPath.parentPath.isCallExpression() &&
+          astPath.parentPath.node.arguments[0].type === 'StringLiteral' &&
+          astPath.parentPath.node.arguments[0].value &&
+          (astPath.parentPath.node.arguments[0].value === dependency ||
+            astPath.parentPath.node.arguments[0].value.startsWith(
               `${dependency}/`,
             ))
         ) {
           isUsed = true;
-          path.stop();
+          astPath.stop();
         }
       },
     });
@@ -469,6 +456,28 @@ function getMemoryUsage(): { used: number; total: number } {
   };
 }
 
+function processResults(
+  batchResults: PromiseSettledResult<{
+    result: string | null;
+    hasError: boolean;
+  }>[],
+): { validResults: string[]; errors: number } {
+  const validResults: string[] = [];
+  let errors = 0;
+
+  for (const result of batchResults) {
+    if (result.status === 'fulfilled') {
+      if (result.value.hasError) {
+        errors++;
+      } else if (result.value.result) {
+        validResults.push(result.value.result);
+      }
+    }
+  }
+
+  return { validResults, errors };
+}
+
 // Enhanced parallel processing with memory management
 async function processFilesInParallel(
   files: string[],
@@ -479,45 +488,41 @@ async function processFilesInParallel(
   const { total: maxMemory } = getMemoryUsage();
   const BATCH_SIZE = Math.min(
     100,
-    Math.max(10, Math.floor(maxMemory / (1024 * 1024 * 50))), // 50MB per batch
+    Math.max(10, Math.floor(maxMemory / (1024 * 1024 * 50))),
   );
 
   const results: string[] = [];
-  let errors = 0;
+  let totalErrors = 0;
+
+  const processFile = async (
+    file: string,
+  ): Promise<{ result: string | null; hasError: boolean }> => {
+    try {
+      const used = await isDependencyUsedInFile(dependency, file, context);
+      return { result: used ? file : null, hasError: false };
+    } catch (error) {
+      console.error(
+        chalk.red(`Error processing ${file}: ${(error as Error).message}`),
+      );
+      return { result: null, hasError: true };
+    }
+  };
 
   for (let index = 0; index < files.length; index += BATCH_SIZE) {
     const batch = files.slice(index, index + BATCH_SIZE);
     const batchResults = await Promise.allSettled(
-      batch.map(async (file) => {
-        try {
-          const used = await isDependencyUsedInFile(dependency, file, context);
-          return used ? file : null;
-        } catch (error) {
-          errors++;
-          console.error(
-            chalk.red(`Error processing ${file}: ${(error as Error).message}`),
-          );
-          return null;
-        }
-      }),
+      batch.map(async (file) => processFile(file)),
     );
+    const { validResults, errors } = processResults(batchResults);
 
-    results.push(
-      ...batchResults
-        .filter(
-          (r): r is PromiseFulfilledResult<string | null> =>
-            r.status === 'fulfilled',
-        )
-        .map((r) => r.value)
-        .filter((r): r is string => r !== null),
-    );
-
+    results.push(...validResults);
+    totalErrors += errors;
     onProgress?.(Math.min(index + BATCH_SIZE, files.length), files.length);
   }
 
-  if (errors > 0) {
+  if (totalErrors > 0) {
     console.warn(
-      chalk.yellow(`\nWarning: ${errors} files had processing errors`),
+      chalk.yellow(`\nWarning: ${totalErrors} files had processing errors`),
     );
   }
 
@@ -579,13 +584,13 @@ async function main(): Promise<void> {
       spinner: 'dots',
     }).start();
 
-    process.on('uncaughtException', (error) => {
+    process.on('uncaughtException', (error: Error): void => {
       spinner.fail('Analysis failed');
       console.error(chalk.red('\nFatal error:'), error);
       process.exit(1);
     });
 
-    process.on('unhandledRejection', (error) => {
+    process.on('unhandledRejection', (error: Error): void => {
       spinner.fail('Analysis failed');
       console.error(chalk.red('\nFatal error:'), error);
       process.exit(1);
@@ -597,7 +602,7 @@ async function main(): Promise<void> {
       options.ignore || [],
     );
 
-    const unusedDependencies: string[] = [];
+    let unusedDependencies: string[] = [];
     const dependencyUsage: Record<string, string[]> = {};
 
     const processedFiles = 0;
@@ -640,7 +645,7 @@ async function main(): Promise<void> {
     }
 
     if (options.verbose) {
-      const table = new Table({
+      const table = new CliTable({
         head: ['Dependency', 'Usage'],
         wordWrap: true,
         colWidths: [30, 70],
@@ -713,4 +718,4 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+await main();
