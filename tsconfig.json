@@ -30,7 +30,6 @@
     }
   },
   "include": [
-    "index.d.ts",
     "tests/**/*.ts",
     "src/**/*.ts",
     "jest.config.*"
