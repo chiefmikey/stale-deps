@@ -3,24 +3,22 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { cpus } from 'node:os';
-import { Worker } from 'node:worker_threads';
+import * as readline from 'node:readline/promises';
 import v8 from 'node:v8';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
+import retry from 'async-retry';
 import chalk from 'chalk';
+import cliProgress from 'cli-progress';
 import Table from 'cli-table3';
 import { Command } from 'commander';
 import { findUp } from 'find-up';
 import { globby } from 'globby';
-import ora from 'ora';
 import { isBinaryFileSync } from 'isbinaryfile';
-import cliProgress from 'cli-progress';
-import retry from 'async-retry';
 import micromatch from 'micromatch';
+import ora from 'ora';
 
 // Update interface for package.json structure
 interface PackageJson {
@@ -49,21 +47,33 @@ const ESSENTIAL_PACKAGES = new Set([
   '@types/node',
   'tslib',
   'prettier',
-  'eslint'
+  'eslint',
 ]);
 
 // Add supported config file types
 const CONFIG_FILES = [
   // JavaScript/TypeScript configs
-  'babel.config.js', 'babel.config.mjs', 'babel.config.ts',
-  'jest.config.js', 'jest.config.mjs', 'jest.config.ts',
-  'webpack.config.js', 'webpack.config.mjs', 'webpack.config.ts',
-  'rollup.config.js', 'rollup.config.mjs', 'rollup.config.ts',
-  '.eslintrc.js', '.eslintrc.cjs',
+  'babel.config.js',
+  'babel.config.mjs',
+  'babel.config.ts',
+  'jest.config.js',
+  'jest.config.mjs',
+  'jest.config.ts',
+  'webpack.config.js',
+  'webpack.config.mjs',
+  'webpack.config.ts',
+  'rollup.config.js',
+  'rollup.config.mjs',
+  'rollup.config.ts',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
   // JSON configs
-  'tsconfig.json', '.eslintrc.json', 'babel.config.json',
+  'tsconfig.json',
+  '.eslintrc.json',
+  'babel.config.json',
   // YAML configs
-  '.eslintrc.yaml', '.eslintrc.yml',
+  '.eslintrc.yaml',
+  '.eslintrc.yml',
   // Modern framework configs
   'vite.config.ts',
   'next.config.mjs',
@@ -77,13 +87,29 @@ const CONFIG_FILES = [
 // Add special package handlers
 const SPECIAL_PACKAGES = new Map([
   ['webpack', (content: string) => content.includes('webpack.config')],
-  ['babel', (content: string) => content.includes('babel.config') || content.includes('.babelrc')],
-  ['eslint', (content: string) => content.includes('.eslintrc') || content.includes('eslint.config')],
-  ['jest', (content: string) => content.includes('jest.config') || content.includes('jest.setup')],
+  [
+    'babel',
+    (content: string) =>
+      content.includes('babel.config') || content.includes('.babelrc'),
+  ],
+  [
+    'eslint',
+    (content: string) =>
+      content.includes('.eslintrc') || content.includes('eslint.config'),
+  ],
+  [
+    'jest',
+    (content: string) =>
+      content.includes('jest.config') || content.includes('jest.setup'),
+  ],
   ['postcss', (content: string) => content.includes('postcss.config')],
   ['tailwindcss', (content: string) => content.includes('tailwind.config')],
   ['rollup', (content: string) => content.includes('rollup.config')],
-  ['prettier', (content: string) => content.includes('.prettierrc') || content.includes('prettier.config')],
+  [
+    'prettier',
+    (content: string) =>
+      content.includes('.prettierrc') || content.includes('prettier.config'),
+  ],
   ['tsconfig-paths', (content: string) => content.includes('tsconfig')],
   ['type-fest', () => true], // Always consider used if found (type-only package)
   ['@types/', () => true], // Always consider used if found (type definitions)
@@ -106,16 +132,18 @@ const RAW_CONTENT_PATTERNS = new Map([
 ]);
 
 // Add workspace detection
-async function getWorkspaceInfo(packageJsonPath: string): Promise<WorkspaceInfo | null> {
+async function getWorkspaceInfo(
+  packageJsonPath: string,
+): Promise<WorkspaceInfo | null> {
   try {
-    const content = await fs.readFile(packageJsonPath, 'utf8');
-    const pkg = JSON.parse(content) as PackageJson;
+    const content = await fs.readFile(packageJsonPath);
+    const package_ = JSON.parse(content) as PackageJson;
 
-    if (!pkg.workspaces) return null;
+    if (!package_.workspaces) return null;
 
-    const patterns = Array.isArray(pkg.workspaces)
-      ? pkg.workspaces
-      : pkg.workspaces.packages || [];
+    const patterns = Array.isArray(package_.workspaces)
+      ? package_.workspaces
+      : package_.workspaces.packages || [];
 
     const packagePaths = await globby(patterns, {
       cwd: path.dirname(packageJsonPath),
@@ -150,10 +178,12 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
     }
     const potentialRootPackageJson = path.join(parentDir, 'package.json');
     try {
-      const rootPkgContent = await fs.readFile(potentialRootPackageJson, 'utf8');
-      const rootPkg = JSON.parse(rootPkgContent) as PackageJson;
-      if (rootPkg.workspaces) {
-        console.log(chalk.yellow('\nMonorepo detected. Using root package.json.'));
+      const rootPackageContent = await fs.readFile(potentialRootPackageJson);
+      const rootPackage = JSON.parse(rootPackageContent) as PackageJson;
+      if (rootPackage.workspaces) {
+        console.log(
+          chalk.yellow('\nMonorepo detected. Using root package.json.'),
+        );
         return potentialRootPackageJson;
       }
     } catch {
@@ -162,9 +192,12 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
     const workspaceInfo = await getWorkspaceInfo(potentialRootPackageJson);
 
     if (workspaceInfo) {
-      const relativePath = path.relative(path.dirname(workspaceInfo.root), packageJsonPath);
-      const isWorkspacePackage = workspaceInfo.packages.some(p =>
-        relativePath.startsWith(p) || p.startsWith(relativePath)
+      const relativePath = path.relative(
+        path.dirname(workspaceInfo.root),
+        packageJsonPath,
+      );
+      const isWorkspacePackage = workspaceInfo.packages.some(
+        (p) => relativePath.startsWith(p) || p.startsWith(relativePath),
       );
 
       if (isWorkspacePackage) {
@@ -181,20 +214,36 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
 
 // Function to read dependencies from package.json
 async function getDependencies(packageJsonPath: string): Promise<string[]> {
-  const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+  const packageJsonContent = await fs.readFile(packageJsonPath);
   const packageJson = JSON.parse(packageJsonContent) as PackageJson;
 
-  const dependencies = packageJson.dependencies ? Object.keys(packageJson.dependencies) : [];
-  const devDependencies = packageJson.devDependencies ? Object.keys(packageJson.devDependencies) : [];
-  const peerDependencies = packageJson.peerDependencies ? Object.keys(packageJson.peerDependencies) : [];
-  const optionalDependencies = packageJson.optionalDependencies ? Object.keys(packageJson.optionalDependencies) : [];
+  const dependencies = packageJson.dependencies
+    ? Object.keys(packageJson.dependencies)
+    : [];
+  const devDependencies = packageJson.devDependencies
+    ? Object.keys(packageJson.devDependencies)
+    : [];
+  const peerDependencies = packageJson.peerDependencies
+    ? Object.keys(packageJson.peerDependencies)
+    : [];
+  const optionalDependencies = packageJson.optionalDependencies
+    ? Object.keys(packageJson.optionalDependencies)
+    : [];
 
-  return [...dependencies, ...devDependencies, ...peerDependencies, ...optionalDependencies];
+  return [
+    ...dependencies,
+    ...devDependencies,
+    ...peerDependencies,
+    ...optionalDependencies,
+  ];
 }
 
 // Function to collect all source files
-async function getSourceFiles(projectDirectory: string, ignorePatterns: string[] = []): Promise<string[]> {
-  return await globby(['**/*.{js,jsx,ts,tsx}'], {
+async function getSourceFiles(
+  projectDirectory: string,
+  ignorePatterns: string[] = [],
+): Promise<string[]> {
+  return globby(['**/*.{js,jsx,ts,tsx}'], {
     cwd: projectDirectory,
     gitignore: true,
     ignore: ['node_modules', 'dist', 'coverage', ...ignorePatterns],
@@ -203,18 +252,25 @@ async function getSourceFiles(projectDirectory: string, ignorePatterns: string[]
 }
 
 // Enhanced package context retrieval
-async function getPackageContext(packageJsonPath: string): Promise<DependencyContext> {
-  const content = await fs.readFile(packageJsonPath, 'utf8');
-  const pkg = JSON.parse(content) as PackageJson;
-  const context: DependencyContext = { scripts: pkg.scripts };
+async function getPackageContext(
+  packageJsonPath: string,
+): Promise<DependencyContext> {
+  const content = await fs.readFile(packageJsonPath);
+  const package_ = JSON.parse(content) as PackageJson;
+  const context: DependencyContext = { scripts: package_.scripts };
   const configs: Record<string, any> = {};
 
   for (const file of CONFIG_FILES) {
     const configPath = path.join(path.dirname(packageJsonPath), file);
     try {
-      if (await fs.access(configPath).then(() => true).catch(() => false)) {
+      if (
+        await fs
+          .access(configPath)
+          .then(() => true)
+          .catch(() => false)
+      ) {
         if (file.endsWith('.json')) {
-          const content = await fs.readFile(configPath, 'utf8');
+          const content = await fs.readFile(configPath);
           configs[file] = JSON.parse(content);
         } else if (file.endsWith('.yaml') || file.endsWith('.yml')) {
           const yaml = await import('yaml').catch(() => null);
@@ -236,7 +292,10 @@ async function getPackageContext(packageJsonPath: string): Promise<DependencyCon
 }
 
 // Add function to safely retry file operations
-async function safeFileOp<T>(operation: () => Promise<T>, filepath: string): Promise<T> {
+async function safeFileOp<T>(
+  operation: () => Promise<T>,
+  filepath: string,
+): Promise<T> {
   return retry(
     async (bail) => {
       try {
@@ -249,7 +308,7 @@ async function safeFileOp<T>(operation: () => Promise<T>, filepath: string): Pro
         throw error;
       }
     },
-    { retries: 3 }
+    { retries: 3 },
   );
 }
 
@@ -257,7 +316,7 @@ async function safeFileOp<T>(operation: () => Promise<T>, filepath: string): Pro
 async function isDependencyUsedInFile(
   dependency: string,
   filePath: string,
-  context: DependencyContext
+  context: DependencyContext,
 ): Promise<boolean> {
   // Check essential packages first
   if (ESSENTIAL_PACKAGES.has(dependency)) {
@@ -265,8 +324,8 @@ async function isDependencyUsedInFile(
   }
 
   // Check special packages first
-  for (const [pkg, checker] of SPECIAL_PACKAGES.entries()) {
-    if (dependency.startsWith(pkg)) {
+  for (const [package_, checker] of SPECIAL_PACKAGES.entries()) {
+    if (dependency.startsWith(package_)) {
       // For type packages, check if the related package is used
       if (dependency.startsWith('@types/')) {
         const basePackage = dependency.slice(7);
@@ -294,7 +353,7 @@ async function isDependencyUsedInFile(
       if (
         JSON.stringify(config).includes(dependency) ||
         (typeof config === 'object' &&
-         config.dependencies?.includes?.(dependency))
+          config.dependencies?.includes?.(dependency))
       ) {
         return true;
       }
@@ -311,7 +370,9 @@ async function isDependencyUsedInFile(
   try {
     content = await fs.readFile(filePath, 'utf8');
   } catch (error) {
-    console.error(chalk.red(`Error reading ${filePath}: ${(error as Error).message}`));
+    console.error(
+      chalk.red(`Error reading ${filePath}: ${(error as Error).message}`),
+    );
     return false;
   }
 
@@ -348,10 +409,9 @@ async function isDependencyUsedInFile(
         // Check require calls
         else if (
           path.isCallExpression() &&
-          (
-            path.node.callee.type === 'Import' ||
-            (path.node.callee.type === 'Identifier' && path.node.callee.name === 'require')
-          ) &&
+          (path.node.callee.type === 'Import' ||
+            (path.node.callee.type === 'Identifier' &&
+              path.node.callee.name === 'require')) &&
           path.node.arguments[0] &&
           path.node.arguments[0].type === 'StringLiteral' &&
           path.node.arguments[0].value &&
@@ -368,7 +428,9 @@ async function isDependencyUsedInFile(
           path.parentPath.node.arguments[0].type === 'StringLiteral' &&
           path.parentPath.node.arguments[0].value &&
           (path.parentPath.node.arguments[0].value === dependency ||
-            path.parentPath.node.arguments[0].value.startsWith(`${dependency}/`))
+            path.parentPath.node.arguments[0].value.startsWith(
+              `${dependency}/`,
+            ))
         ) {
           isUsed = true;
           path.stop();
@@ -376,18 +438,21 @@ async function isDependencyUsedInFile(
       },
     });
   } catch (error) {
-    console.error(chalk.red(`Error parsing ${filePath}: ${(error as Error).message}`));
+    console.error(
+      chalk.red(`Error parsing ${filePath}: ${(error as Error).message}`),
+    );
   }
 
   // Add raw content pattern matching
   for (const [base, patterns] of RAW_CONTENT_PATTERNS.entries()) {
-    if (dependency.startsWith(base)) {
-      if (patterns.some(pattern => micromatch.isMatch(dependency, pattern))) {
-        // Check content for any variation of the package name
-        const searchPattern = base.replace(/[@/-]/g, '.');
-        if (new RegExp(searchPattern, 'i').test(content)) {
-          return true;
-        }
+    if (
+      dependency.startsWith(base) &&
+      patterns.some((pattern) => micromatch.isMatch(dependency, pattern))
+    ) {
+      // Check content for any variation of the package name
+      const searchPattern = base.replaceAll(/[/@-]/g, '.');
+      if (new RegExp(searchPattern, 'i').test(content)) {
+        return true;
       }
     }
   }
@@ -409,19 +474,19 @@ async function processFilesInParallel(
   files: string[],
   dependency: string,
   context: DependencyContext,
-  onProgress?: (processed: number, total: number) => void
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<string[]> {
   const { total: maxMemory } = getMemoryUsage();
   const BATCH_SIZE = Math.min(
     100,
-    Math.max(10, Math.floor(maxMemory / (1024 * 1024 * 50))) // 50MB per batch
+    Math.max(10, Math.floor(maxMemory / (1024 * 1024 * 50))), // 50MB per batch
   );
 
   const results: string[] = [];
   let errors = 0;
 
-  for (let i = 0; i < files.length; i += BATCH_SIZE) {
-    const batch = files.slice(i, i + BATCH_SIZE);
+  for (let index = 0; index < files.length; index += BATCH_SIZE) {
+    const batch = files.slice(index, index + BATCH_SIZE);
     const batchResults = await Promise.allSettled(
       batch.map(async (file) => {
         try {
@@ -429,24 +494,31 @@ async function processFilesInParallel(
           return used ? file : null;
         } catch (error) {
           errors++;
-          console.error(chalk.red(`Error processing ${file}: ${(error as Error).message}`));
+          console.error(
+            chalk.red(`Error processing ${file}: ${(error as Error).message}`),
+          );
           return null;
         }
-      })
+      }),
     );
 
     results.push(
       ...batchResults
-        .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
-        .map(r => r.value)
-        .filter((r): r is string => r !== null)
+        .filter(
+          (r): r is PromiseFulfilledResult<string | null> =>
+            r.status === 'fulfilled',
+        )
+        .map((r) => r.value)
+        .filter((r): r is string => r !== null),
     );
 
-    onProgress?.(Math.min(i + BATCH_SIZE, files.length), files.length);
+    onProgress?.(Math.min(index + BATCH_SIZE, files.length), files.length);
   }
 
   if (errors > 0) {
-    console.warn(chalk.yellow(`\nWarning: ${errors} files had processing errors`));
+    console.warn(
+      chalk.yellow(`\nWarning: ${errors} files had processing errors`),
+    );
   }
 
   return results;
@@ -454,13 +526,22 @@ async function processFilesInParallel(
 
 // Add function to detect the package manager
 async function detectPackageManager(projectDirectory: string): Promise<string> {
-  if (await fs.access(path.join(projectDirectory, 'yarn.lock')).then(() => true).catch(() => false)) {
+  if (
+    await fs
+      .access(path.join(projectDirectory, 'yarn.lock'))
+      .then(() => true)
+      .catch(() => false)
+  ) {
     return 'yarn';
-  } else if (await fs.access(path.join(projectDirectory, 'pnpm-lock.yaml')).then(() => true).catch(() => false)) {
+  } else if (
+    await fs
+      .access(path.join(projectDirectory, 'pnpm-lock.yaml'))
+      .then(() => true)
+      .catch(() => false)
+  ) {
     return 'pnpm';
-  } else {
-    return 'npm';
   }
+  return 'npm';
 }
 
 // Main execution
@@ -470,7 +551,9 @@ async function main(): Promise<void> {
 
     program
       .version('1.0.0')
-      .description('CLI tool that identifies and removes unused npm dependencies')
+      .description(
+        'CLI tool that identifies and removes unused npm dependencies',
+      )
       .option('-v, --verbose', 'display detailed usage information')
       .option('-i, --ignore <patterns...>', 'patterns to ignore')
       .option('--safe', 'prevent removing essential packages')
@@ -509,16 +592,20 @@ async function main(): Promise<void> {
     });
 
     const dependencies = await getDependencies(packageJsonPath);
-    const sourceFiles = await getSourceFiles(projectDirectory, options.ignore || []);
+    const sourceFiles = await getSourceFiles(
+      projectDirectory,
+      options.ignore || [],
+    );
 
     const unusedDependencies: string[] = [];
     const dependencyUsage: Record<string, string[]> = {};
 
-    let processedFiles = 0;
+    const processedFiles = 0;
     const totalFiles = dependencies.length * sourceFiles.length;
 
     const progressBar = new cliProgress.SingleBar({
-      format: 'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
+      format:
+        'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
       barCompleteChar: '\u2588',
       barIncompleteChar: '\u2591',
     });
@@ -534,7 +621,7 @@ async function main(): Promise<void> {
         context,
         (processed) => {
           progressBar.update(processedFiles + processed);
-        }
+        },
       );
       if (usageFiles.length === 0) {
         unusedDependencies.push(dep);
@@ -547,7 +634,9 @@ async function main(): Promise<void> {
 
     // Filter out essential packages if in safe mode
     if (program.opts().safe) {
-      unusedDependencies = unusedDependencies.filter(dep => !ESSENTIAL_PACKAGES.has(dep));
+      unusedDependencies = unusedDependencies.filter(
+        (dep) => !ESSENTIAL_PACKAGES.has(dep),
+      );
     }
 
     if (options.verbose) {
@@ -585,7 +674,9 @@ async function main(): Promise<void> {
       // Detect package manager once
       const packageManager = await detectPackageManager(projectDirectory);
 
-      const answer = await rl.question(chalk.blue('\nDo you want to remove these dependencies? (y/N) '));
+      const answer = await rl.question(
+        chalk.blue('\nDo you want to remove these dependencies? (y/N) '),
+      );
       if (answer.toLowerCase() === 'y') {
         // Build uninstall command
         let uninstallCommand = '';

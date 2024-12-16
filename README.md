@@ -6,7 +6,8 @@
 [![Downloads](https://img.shields.io/npm/dm/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
 [![License](https://img.shields.io/npm/l/stale-deps.svg)](https://github.com/chiefmikey/stale-deps/blob/main/LICENSE)
 
-Automatically detect and remove unused dependencies in your JavaScript and TypeScript projects with confidence.
+Automatically detect and remove unused dependencies in your JavaScript and
+TypeScript projects with confidence.
 
 ## Features
 
