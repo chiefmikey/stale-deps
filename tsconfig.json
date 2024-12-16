@@ -3,7 +3,7 @@
     "lib": [
       "es6"
     ],
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "module": "CommonJS",
     "target": "ES2022",
     "sourceMap": false,
