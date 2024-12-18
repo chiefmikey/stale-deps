@@ -4,7 +4,10 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import rewire from 'rewire';
 
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
+
+import { analyzeDependencies } from 'test/analyzer';
+
 const myModule = rewire('../../../src/index.ts');
 
 const getWorkspaceInfo = myModule.__get__('getWorkspaceInfo');

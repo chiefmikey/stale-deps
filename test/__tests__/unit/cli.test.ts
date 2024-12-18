@@ -5,7 +5,7 @@ import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 import { stdin as mockStdin } from 'mock-stdin';
 
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
 
 describe('cLI Commands', () => {
   it('should display help information', () => {

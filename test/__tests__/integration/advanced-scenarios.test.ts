@@ -4,7 +4,7 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
 import { analyzeDependencies } from '../../analyzer';
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
 
 describe('advanced Scenarios', () => {
   beforeEach(async () => {

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 
 import { analyzeDependencies } from '../../analyzer';
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
 
 describe('dependency Analysis', () => {
   it('should detect dynamic imports', async () => {

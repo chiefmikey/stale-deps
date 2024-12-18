@@ -3,10 +3,10 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 import { beforeEach, describe, expect, it } from '@jest/globals';
+import rewire from 'rewire';
 
 import { analyzeDependencies } from '../../analyzer';
-import { mockProjectRoot } from '../setup/setup';
-import rewire from 'rewire';
+import { mockProjectRoot } from '../../setup';
 
 const myModule = rewire('../../../src/index.ts');
 

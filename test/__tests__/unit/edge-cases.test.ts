@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
 
 describe('edge Cases', () => {
   it('should handle unicode filenames', async () => {

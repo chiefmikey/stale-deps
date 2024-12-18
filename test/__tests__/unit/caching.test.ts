@@ -5,7 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
 import { analyzeDependencies } from '../../analyzer';
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
 
 describe('caching Behavior', () => {
   beforeEach(async () => {

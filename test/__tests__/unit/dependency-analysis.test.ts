@@ -4,7 +4,7 @@ import rewire from 'rewire';
 
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
-import { mockProjectRoot } from '../setup/setup';
+import { mockProjectRoot } from '../../setup';
 
 const myModule = rewire('../../../src/index.ts');
 

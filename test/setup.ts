@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-export const mockProjectRoot = path.join(__dirname, 'fixtures');
+export const mockProjectRoot = path.resolve('test/__fixtures__/test-project');
+
+export const setupTestEnvironment = (): string => {
+  return mockProjectRoot;
+};
 
 export const createMockProject = async (): Promise<void> => {
   await fs.mkdir(mockProjectRoot, { recursive: true });

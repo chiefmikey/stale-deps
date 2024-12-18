@@ -3,8 +3,8 @@ import path from 'node:path';
 
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
-import { analyzeDependencies } from './analyzer';
-import { mockProjectRoot } from '../setup/setup';
+import { analyzeDependencies } from '../../analyzer';
+import { mockProjectRoot } from '../../setup';
 
 describe('build Tool Dependencies', () => {
   beforeEach(async () => {
