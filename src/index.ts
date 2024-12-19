@@ -9,6 +9,13 @@ import v8 from 'node:v8';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
+import type { NodePath } from '@babel/traverse';
+import type {
+  ImportDeclaration,
+  CallExpression,
+  TSImportType,
+  TSExternalModuleReference,
+} from '@babel/types';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import CliTable from 'cli-table3';
@@ -19,6 +26,8 @@ import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
 import ora from 'ora';
 
+// Add type imports at the top
+
 // Update interface for package.json structure
 interface PackageJson {
   dependencies?: Record<string, string>;
@@ -27,6 +36,13 @@ interface PackageJson {
   optionalDependencies?: Record<string, string>;
   workspaces?: string[] | { packages: string[] };
   scripts?: Record<string, string>;
+}
+
+// Define an extended interface
+interface ExtendedPackageJson extends PackageJson {
+  prettier?: unknown;
+  eslintConfig?: unknown;
+  stylelint?: unknown;
 }
 
 // Add interface for dependency context
@@ -40,6 +56,10 @@ interface WorkspaceInfo {
   root: string;
   packages: string[];
 }
+const traverseFunction = ((traverse as any).default || traverse) as (
+  ast: any,
+  options: any,
+) => void;
 
 // Add essential packages that should never be removed
 const ESSENTIAL_PACKAGES = new Set([
@@ -84,6 +104,12 @@ const CONFIG_FILES = [
   'nuxt.config.ts',
 ];
 
+// Convert CONFIG_FILES to include glob patterns
+const CONFIG_FILE_GLOBS = CONFIG_FILES.flatMap((file) => [
+  file,
+  `**/${file}`, // Match files in any subdirectory
+]);
+
 // Add special package handlers
 const SPECIAL_PACKAGES = new Map<string, (content: string) => boolean>([
   ['webpack', (content: string): boolean => content.includes('webpack.config')],
@@ -95,7 +121,9 @@ const SPECIAL_PACKAGES = new Map<string, (content: string) => boolean>([
   [
     'eslint',
     (content: string): boolean =>
-      content.includes('.eslintrc') || content.includes('eslint.config'),
+      content.includes('.eslintrc') ||
+      content.includes('eslintConfig') ||
+      content.includes('eslint.config'),
   ],
   [
     'jest',
@@ -117,8 +145,8 @@ const SPECIAL_PACKAGES = new Map<string, (content: string) => boolean>([
     'tsconfig-paths',
     (content: string): boolean => content.includes('tsconfig'),
   ],
-  ['type-fest', (): boolean => true], // Always consider used if found (type-only package)
-  ['@types/', (): boolean => true], // Always consider used if found (type definitions)
+  ['type-fest', (): boolean => true],
+  ['@types/', (): boolean => true],
 ]);
 
 // Add raw content patterns
@@ -251,12 +279,69 @@ async function getSourceFiles(
   projectDirectory: string,
   ignorePatterns: string[] = [],
 ): Promise<string[]> {
-  return globby(['**/*.{js,jsx,ts,tsx}'], {
-    cwd: projectDirectory,
-    gitignore: true,
-    ignore: ['node_modules', 'dist', 'coverage', ...ignorePatterns],
-    absolute: true,
+  const files = await globby(
+    ['**/*.{js,jsx,ts,tsx}', 'package.json', ...CONFIG_FILE_GLOBS],
+    {
+      cwd: projectDirectory,
+      gitignore: true,
+      ignore: ['node_modules', 'dist', 'coverage', ...ignorePatterns],
+      absolute: true,
+    },
+  );
+  return files;
+}
+
+// Add a helper function to check if a type package corresponds to an installed package
+async function isTypePackageUsed(
+  dependency: string,
+  installedPackages: string[],
+  unusedDependencies: string[],
+  context: DependencyContext,
+  sourceFiles: string[],
+): Promise<{ isUsed: boolean; supportedPackage?: string }> {
+  if (!dependency.startsWith('@types/')) {
+    return { isUsed: false };
+  }
+
+  const correspondingPackage = dependency
+    .replace(/^@types\//, '')
+    .replaceAll('__', '/');
+  const supportedPackage = installedPackages.find((package_) => {
+    const normalizedPackage = package_.replace(/^@/, '').replaceAll('/', '__');
+    return (
+      normalizedPackage === correspondingPackage ||
+      normalizedPackage.startsWith(`${correspondingPackage}/`)
+    );
   });
+
+  if (supportedPackage && !unusedDependencies.includes(supportedPackage)) {
+    // Check if the corresponding package is used in the source files
+    for (const file of sourceFiles) {
+      if (await isDependencyUsedInFile(supportedPackage, file, context)) {
+        return { isUsed: true, supportedPackage };
+      }
+    }
+  }
+
+  // Check if any installed package has this type package as a peer dependency
+  for (const package_ of installedPackages) {
+    try {
+      const packageJsonPath = require.resolve(`${package_}/package.json`, {
+        paths: [process.cwd()],
+      });
+      const packageJsonBuffer = await fs.readFile(packageJsonPath);
+      const packageJson = JSON.parse(
+        packageJsonBuffer.toString(),
+      ) as PackageJson;
+      if (packageJson.peerDependencies?.[dependency]) {
+        return { isUsed: true, supportedPackage: package_ };
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  return { isUsed: false };
 }
 
 // Enhanced package context retrieval
@@ -264,11 +349,17 @@ async function getPackageContext(
   packageJsonPath: string,
 ): Promise<DependencyContext> {
   const buffer = await fs.readFile(packageJsonPath);
-  const package_ = JSON.parse(buffer.toString()) as PackageJson;
-  const context: DependencyContext = { scripts: package_.scripts };
-  const configs: Record<string, any> = {};
+  const package_ = JSON.parse(buffer.toString()) as PackageJson & {
+    eslintConfig?: { extends?: string | string[] };
+    prettier?: string;
+    stylelint?: { extends?: string | string[] };
+  };
 
-  for (const file of CONFIG_FILES) {
+  // Store package.json directly in configs
+  const configs: Record<string, any> = { 'package.json': package_ };
+
+  // Load external config files
+  for (const file of CONFIG_FILE_GLOBS) {
     const configPath = path.join(path.dirname(packageJsonPath), file);
     try {
       if (
@@ -286,6 +377,9 @@ async function getPackageContext(
             const content = await fs.readFile(configPath, 'utf8');
             configs[file] = yaml.parse(content);
           }
+        } else if (file.endsWith('.js') || file.endsWith('.ts')) {
+          const content = await fs.readFile(configPath, 'utf8');
+          configs[file] = content;
         } else {
           const config = await import(configPath).catch(() => ({}));
           configs[file] = config.default || config;
@@ -295,11 +389,44 @@ async function getPackageContext(
       // Ignore config load errors
     }
   }
-  context.configs = configs;
-  return context;
+
+  return {
+    scripts: package_.scripts,
+    configs,
+  };
 }
 
-// Enhanced dependency detection
+// Add helper function to recursively scan objects for dependency usage
+function scanForDependency(object: unknown, dependency: string): boolean {
+  if (typeof object === 'string') {
+    return (
+      object === dependency ||
+      object === `@${dependency}` ||
+      object.startsWith(`${dependency}/`) ||
+      object.startsWith(`@${dependency}/`) ||
+      // Handle common config patterns
+      object === `${dependency}/config` ||
+      object === `@${dependency}/config` ||
+      object === `${dependency}-config` ||
+      object === `@${dependency}/eslint-config` ||
+      object === `@${dependency}/prettier-config` ||
+      object === `@${dependency}/stylelint-config`
+    );
+  }
+
+  if (Array.isArray(object)) {
+    return object.some((item) => scanForDependency(item, dependency));
+  }
+
+  if (object && typeof object === 'object') {
+    return Object.values(object).some((value) =>
+      scanForDependency(value, dependency),
+    );
+  }
+
+  return false;
+}
+
 async function isDependencyUsedInFile(
   dependency: string,
   filePath: string,
@@ -310,141 +437,161 @@ async function isDependencyUsedInFile(
     return true;
   }
 
-  // Check special packages first
-  for (const [package_, checker] of SPECIAL_PACKAGES.entries()) {
-    if (dependency.startsWith(package_)) {
-      // For type packages, check if the related package is used
-      if (dependency.startsWith('@types/')) {
-        const basePackage = dependency.slice(7);
-        if (basePackage === 'node') return true; // Always keep @types/node
-        // Check if the base package is in dependencies
-        const allDeps = Object.keys(context.configs?.['package.json'] || {});
-        if (allDeps.includes(basePackage)) return true;
+  // For package.json, do a deep scan of all configurations
+  if (
+    path.basename(filePath) === 'package.json' &&
+    context.configs?.['package.json'] && // Deep scan all of package.json content
+    scanForDependency(context.configs['package.json'], dependency)
+  ) {
+    return true;
+  }
+
+  // Check if the file is a config file we've parsed
+  const configKey = path.relative(path.dirname(filePath), filePath);
+  const config = context.configs?.[configKey];
+  if (config) {
+    if (typeof config === 'string') {
+      // If the config is a string, treat it as raw content
+      if (config.includes(dependency)) {
+        return true;
       }
-      return checker(await fs.readFile(filePath, 'utf8').catch(() => ''));
+    } else if (scanForDependency(config, dependency)) {
+      return true;
     }
   }
 
-  // Check scripts first
+  // Check scripts for exact matches
   if (context.scripts) {
     for (const script of Object.values(context.scripts)) {
-      if (script.includes(dependency)) {
+      const scriptParts = script.split(' ');
+      if (scriptParts.includes(dependency)) {
         return true;
       }
     }
   }
 
-  // Check configs
-  if (context.configs) {
-    for (const config of Object.values(context.configs)) {
-      if (
-        JSON.stringify(config).includes(dependency) ||
-        (typeof config === 'object' &&
-          config.dependencies?.includes?.(dependency))
-      ) {
-        return true;
-      }
+  // Check file imports
+  try {
+    if (isBinaryFileSync(filePath)) {
+      return false;
     }
-  }
 
-  // Skip binary files
-  if (isBinaryFileSync(filePath)) {
-    return false;
-  }
+    const content = await fs.readFile(filePath, 'utf8');
 
-  // Continue with existing file content check
-  let content: string;
-  try {
-    content = await fs.readFile(filePath, 'utf8');
-  } catch (error) {
-    console.error(
-      chalk.red(`Error reading ${filePath}: ${(error as Error).message}`),
-    );
-    return false;
-  }
+    // AST parsing for imports/requires
+    try {
+      const ast = parse(content, {
+        sourceType: 'unambiguous',
+        plugins: [
+          'typescript',
+          'jsx',
+          'decorators-legacy',
+          'classProperties',
+          'dynamicImport',
+          'exportDefaultFrom',
+          'exportNamespaceFrom',
+          'importMeta',
+        ],
+      });
 
-  let isUsed = false;
+      let isUsed = false;
+      traverseFunction(ast, {
+        ImportDeclaration(path: NodePath<ImportDeclaration>) {
+          const importSource = path.node.source.value;
+          if (matchesDependency(importSource, dependency)) {
+            isUsed = true;
+            path.stop();
+          }
+        },
+        CallExpression(path: NodePath<CallExpression>) {
+          if (
+            path.node.callee.type === 'Identifier' &&
+            path.node.callee.name === 'require' &&
+            path.node.arguments[0]?.type === 'StringLiteral' &&
+            matchesDependency(path.node.arguments[0].value, dependency)
+          ) {
+            isUsed = true;
+            path.stop();
+          }
+        },
+        // Add handlers for TypeScript type-only imports
+        TSImportType(path: NodePath<TSImportType>) {
+          const importSource = path.node.argument.value;
+          if (matchesDependency(importSource, dependency)) {
+            isUsed = true;
+            path.stop();
+          }
+        },
+        TSExternalModuleReference(path: NodePath<TSExternalModuleReference>) {
+          const importSource = path.node.expression.value;
+          if (matchesDependency(importSource, dependency)) {
+            isUsed = true;
+            path.stop();
+          }
+        },
+      });
 
-  try {
-    const ast = parse(content, {
-      sourceType: 'unambiguous',
-      plugins: [
-        'typescript',
-        'jsx',
-        'decorators-legacy',
-        'classProperties',
-        'dynamicImport',
-        'exportDefaultFrom',
-        'exportNamespaceFrom',
-        'importMeta',
-      ],
-    });
+      if (isUsed) return true;
 
-    traverse(ast, {
-      enter(astPath): void {
-        // Check import/export statements
+      // Only check raw patterns if not found in imports
+      for (const [base, patterns] of RAW_CONTENT_PATTERNS.entries()) {
         if (
-          (astPath.isImportDeclaration() || astPath.isExportDeclaration()) &&
-          'source' in astPath.node &&
-          astPath.node.source?.value &&
-          (astPath.node.source.value === dependency ||
-            astPath.node.source.value.startsWith(`${dependency}/`))
+          dependency.startsWith(base) &&
+          patterns.some((pattern) => micromatch.isMatch(dependency, pattern))
         ) {
-          isUsed = true;
-          astPath.stop();
+          const searchPattern = new RegExp(
+            `\\b${dependency.replaceAll(/[/@-]/g, '[/@-]')}\\b`,
+            'i',
+          );
+          if (searchPattern.test(content)) {
+            return true;
+          }
         }
-        // Check require calls
-        else if (
-          astPath.isCallExpression() &&
-          (astPath.node.callee.type === 'Import' ||
-            (astPath.node.callee.type === 'Identifier' &&
-              astPath.node.callee.name === 'require')) &&
-          astPath.node.arguments[0] &&
-          astPath.node.arguments[0].type === 'StringLiteral' &&
-          astPath.node.arguments[0].value &&
-          (astPath.node.arguments[0].value === dependency ||
-            astPath.node.arguments[0].value.startsWith(`${dependency}/`))
-        ) {
-          isUsed = true;
-          astPath.stop();
-        }
-        // Check dynamic imports
-        else if (
-          astPath.isImport() &&
-          astPath.parentPath.isCallExpression() &&
-          astPath.parentPath.node.arguments[0].type === 'StringLiteral' &&
-          astPath.parentPath.node.arguments[0].value &&
-          (astPath.parentPath.node.arguments[0].value === dependency ||
-            astPath.parentPath.node.arguments[0].value.startsWith(
-              `${dependency}/`,
-            ))
-        ) {
-          isUsed = true;
-          astPath.stop();
-        }
-      },
-    });
-  } catch (error) {
-    console.error(
-      chalk.red(`Error parsing ${filePath}: ${(error as Error).message}`),
-    );
-  }
+      }
+    } catch {
+      // Ignore parse errors
+    }
 
-  // Add raw content pattern matching
-  for (const [base, patterns] of RAW_CONTENT_PATTERNS.entries()) {
-    if (
-      dependency.startsWith(base) &&
-      patterns.some((pattern) => micromatch.isMatch(dependency, pattern))
-    ) {
-      // Check content for any variation of the package name
-      const searchPattern = base.replaceAll(/[/@-]/g, '.');
-      if (new RegExp(searchPattern, 'i').test(content)) {
-        return true;
+    // Only check raw patterns if not found in imports
+    for (const [base, patterns] of RAW_CONTENT_PATTERNS.entries()) {
+      if (
+        dependency.startsWith(base) &&
+        patterns.some((pattern) => micromatch.isMatch(dependency, pattern))
+      ) {
+        const searchPattern = new RegExp(
+          `\\b${dependency.replaceAll(/[/@-]/g, '[/@-]')}\\b`,
+          'i',
+        );
+        if (searchPattern.test(content)) {
+          return true;
+        }
       }
     }
+  } catch {
+    // Ignore file read errors
   }
 
-  return isUsed;
+  return false;
+}
+
+// Add a helper function to match dependencies
+function matchesDependency(importSource: string, dependency: string): boolean {
+  const depWithoutScope = dependency.startsWith('@')
+    ? dependency.split('/')[1]
+    : dependency;
+  const sourceWithoutScope = importSource.startsWith('@')
+    ? importSource.split('/')[1]
+    : importSource;
+
+  return (
+    importSource === dependency ||
+    importSource.startsWith(`${dependency}/`) ||
+    sourceWithoutScope === depWithoutScope ||
+    sourceWithoutScope.startsWith(`${depWithoutScope}/`) ||
+    (dependency.startsWith('@types/') &&
+      (importSource === dependency.replace(/^@types\//, '') ||
+        importSource.startsWith(`${dependency.replace(/^@types\//, '')}/`)))
+  );
 }
 
 // Add memory check function
@@ -604,6 +751,7 @@ async function main(): Promise<void> {
 
     let unusedDependencies: string[] = [];
     const dependencyUsage: Record<string, string[]> = {};
+    const typePackageSupport: Record<string, string> = {};
 
     const processedFiles = 0;
     const totalFiles = dependencies.length * sourceFiles.length;
@@ -620,6 +768,9 @@ async function main(): Promise<void> {
     }
 
     for (const dep of dependencies) {
+      if (options.verbose) {
+        console.log(`Checking dependency: ${dep}`);
+      }
       const usageFiles = await processFilesInParallel(
         sourceFiles,
         dep,
@@ -628,8 +779,14 @@ async function main(): Promise<void> {
           progressBar.update(processedFiles + processed);
         },
       );
+
       if (usageFiles.length === 0) {
+        if (options.verbose) {
+          console.log(`No usage found for: ${dep}`);
+        }
         unusedDependencies.push(dep);
+      } else if (options.verbose) {
+        console.log(`Found ${usageFiles.length} uses of ${dep}`);
       }
       dependencyUsage[dep] = usageFiles;
     }
@@ -644,6 +801,28 @@ async function main(): Promise<void> {
       );
     }
 
+    // Filter out type packages that correspond to installed packages
+    const installedPackages = dependencies.filter(
+      (dep) => !dep.startsWith('@types/'),
+    );
+    const typePackageUsagePromises = unusedDependencies.map(async (dep) => {
+      const { isUsed, supportedPackage } = await isTypePackageUsed(
+        dep,
+        installedPackages,
+        unusedDependencies,
+        context,
+        sourceFiles,
+      );
+      if (isUsed && supportedPackage) {
+        typePackageSupport[dep] = supportedPackage;
+      }
+      return { dep, isUsed };
+    });
+    const typePackageUsageResults = await Promise.all(typePackageUsagePromises);
+    unusedDependencies = typePackageUsageResults
+      .filter((result) => !result.isUsed)
+      .map((result) => result.dep);
+
     if (options.verbose) {
       const table = new CliTable({
         head: ['Dependency', 'Usage'],
@@ -653,11 +832,14 @@ async function main(): Promise<void> {
 
       for (const dep of dependencies) {
         const usage = dependencyUsage[dep];
+        const supportInfo = typePackageSupport[dep]
+          ? ` (supports "${typePackageSupport[dep]}")`
+          : '';
         table.push([
           dep,
           usage.length > 0
             ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
-            : chalk.yellow('Not used'),
+            : chalk.yellow(`Not used${supportInfo}`),
         ]);
       }
 
@@ -698,7 +880,9 @@ async function main(): Promise<void> {
             uninstallCommand = `pnpm remove ${unusedDependencies.join(' ')}`;
             break;
           }
-          // no default
+          default: {
+            break;
+          }
         }
 
         execSync(uninstallCommand, {
