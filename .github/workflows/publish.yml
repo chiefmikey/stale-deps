@@ -1,0 +1,114 @@
+name: Publish Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to publish from'
+        required: true
+        default: 'main'
+        type: string
+      version_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: 'patch'
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Bump version
+        id: bump_version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+          npm version ${{ github.event.inputs.version_type }} --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build package
+        run: npm run build
+
+      - name: Publish to NPM
+        id: npm_publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Push Git Changes
+        if: steps.npm_publish.outcome == 'success'
+        run: |
+          git push
+          git push --tags
+
+      - name: Create GitHub Release
+        if: steps.npm_publish.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v${{ steps.bump_version.outputs.new_version }} \
+            --title "v${{ steps.bump_version.outputs.new_version }}" \
+            --generate-notes
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "🎉 Successfully published version ${{ steps.bump_version.outputs.new_version }}"
+          echo "- NPM package: https://www.npmjs.com/package/stale-deps"
+          echo "- GitHub release: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.bump_version.outputs.new_version }}"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "::error::Deployment failed, attempting rollback..."
+
+          # Unpublish from NPM if needed
+          if [ "${{ steps.npm_publish.outcome }}" == "success" ]; then
+            npm unpublish stale-deps@${{ steps.bump_version.outputs.new_version }}
+          fi
+
+          # Remove local tag
+          git tag -d v${{ steps.bump_version.outputs.new_version }} || true
+
+          # Remove remote tag if it was pushed
+          git push --delete origin v${{ steps.bump_version.outputs.new_version }} || true
+
+          # Reset local changes
+          git reset --hard HEAD^
+          git push --force || true
+
+          echo "::error::Rollback complete. Please check the repository state."
