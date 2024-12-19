@@ -2,18 +2,14 @@ module.exports = {
   presets: [
     ['@babel/preset-env', {
       targets: { node: 'current' },
-      modules: 'auto'
+      modules: 'commonjs'
     }],
     '@babel/preset-typescript'
   ],
   plugins: [
-    '@babel/plugin-syntax-jsx',
+    '@babel/plugin-transform-modules-commonjs',
     '@babel/plugin-syntax-typescript',
     ['@babel/plugin-proposal-decorators', { legacy: true }],
     '@babel/plugin-proposal-class-properties'
-  ],
-  assumptions: {
-    setPublicClassFields: true
-  },
-  sourceType: 'module'
+  ]
 };

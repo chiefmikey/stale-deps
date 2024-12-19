@@ -3,9 +3,11 @@
   "compilerOptions": {
     "noEmit": true,
     "types": [
-      "node",
-      "jest"
+      "jest",
+      "node"
     ],
+    "module": "ESNext",
+    "moduleResolution": "NodeNext",
     "paths": {
       "@/*": [
         "../src/*"
@@ -16,6 +18,8 @@
     }
   },
   "include": [
+    "../**/*.test.ts",
+    "../**/__tests__/**/*",
     "../src/**/*",
     "./**/*"
   ],
