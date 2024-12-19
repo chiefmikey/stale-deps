@@ -1041,11 +1041,31 @@ async function main(): Promise<void> {
   }
 }
 
-// Wrap the main call in a try/catch
-try {
-  await main();
-} catch (error) {
-  cleanup();
-  console.error(chalk.red('\nUnexpected error:'), error);
-  process.exit(1);
+// Replace the top-level await with an async init function
+async function init(): Promise<void> {
+  try {
+    // Handle exit signals at the top level
+    const exitHandler = (signal: string) => {
+      console.log(`\n${signal} received. Cleaning up...`);
+      cleanup();
+      // Exit without error since this is an intentional exit
+      process.exit(0);
+    };
+
+    // Handle both SIGINT (Ctrl+C) and SIGTERM
+    process.on('SIGINT', () => exitHandler('SIGINT'));
+    process.on('SIGTERM', () => exitHandler('SIGTERM'));
+
+    await main();
+  } catch (error) {
+    cleanup();
+    console.error(chalk.red('\nUnexpected error:'), error);
+    process.exit(1);
+  }
 }
+
+// Run the program
+init().catch((error) => {
+  console.error(chalk.red('\nFatal error:'), error);
+  process.exit(1);
+});
