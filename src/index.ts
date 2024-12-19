@@ -303,18 +303,21 @@ async function isTypePackageUsed(
     return { isUsed: false };
   }
 
+  // Handle special case for @types/babel__* packages etc
   const correspondingPackage = dependency
     .replace(/^@types\//, '')
     .replaceAll('__', '/');
-  const supportedPackage = installedPackages.find((package_) => {
-    const normalizedPackage = package_.replace(/^@/, '').replaceAll('/', '__');
-    return (
-      normalizedPackage === correspondingPackage ||
-      normalizedPackage.startsWith(`${correspondingPackage}/`)
-    );
-  });
 
-  if (supportedPackage && !unusedDependencies.includes(supportedPackage)) {
+  // For scoped packages, add the @ prefix back
+  const normalizedPackage = correspondingPackage.includes('/')
+    ? `@${correspondingPackage}`
+    : correspondingPackage;
+
+  const supportedPackage = installedPackages.find(
+    (package_) => package_ === normalizedPackage,
+  );
+
+  if (supportedPackage) {
     // Check if the corresponding package is used in the source files
     for (const file of sourceFiles) {
       if (await isDependencyUsedInFile(supportedPackage, file, context)) {
@@ -477,6 +480,15 @@ async function isDependencyUsedInFile(
     }
 
     const content = await fs.readFile(filePath, 'utf8');
+
+    // Check for dynamic imports in raw content
+    const dynamicImportRegex = new RegExp(
+      `import\\s*\\(\\s*['"]${dependency.replaceAll(/[/@-]/g, '[/@-]')}['"]\\s*\\)`,
+      'i',
+    );
+    if (dynamicImportRegex.test(content)) {
+      return true;
+    }
 
     // AST parsing for imports/requires
     try {
