@@ -25,6 +25,7 @@ import { globby } from 'globby';
 import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
 import ora from 'ora';
+import type { Ora } from 'ora';
 
 // Add type imports at the top
 
@@ -36,13 +37,6 @@ interface PackageJson {
   optionalDependencies?: Record<string, string>;
   workspaces?: string[] | { packages: string[] };
   scripts?: Record<string, string>;
-}
-
-// Define an extended interface
-interface ExtendedPackageJson extends PackageJson {
-  prettier?: unknown;
-  eslintConfig?: unknown;
-  stylelint?: unknown;
 }
 
 // Add interface for dependency context
@@ -68,46 +62,6 @@ const ESSENTIAL_PACKAGES = new Set([
   'tslib',
   'prettier',
   'eslint',
-]);
-
-// Add supported config file types
-const CONFIG_FILES = [
-  // JavaScript/TypeScript configs
-  'babel.config.js',
-  'babel.config.mjs',
-  'babel.config.ts',
-  'jest.config.js',
-  'jest.config.mjs',
-  'jest.config.ts',
-  'webpack.config.js',
-  'webpack.config.mjs',
-  'webpack.config.ts',
-  'rollup.config.js',
-  'rollup.config.mjs',
-  'rollup.config.ts',
-  '.eslintrc.js',
-  '.eslintrc.cjs',
-  // JSON configs
-  'tsconfig.json',
-  '.eslintrc.json',
-  'babel.config.json',
-  // YAML configs
-  '.eslintrc.yaml',
-  '.eslintrc.yml',
-  // Modern framework configs
-  'vite.config.ts',
-  'next.config.mjs',
-  'astro.config.mjs',
-  'remix.config.js',
-  'svelte.config.js',
-  'vue.config.js',
-  'nuxt.config.ts',
-];
-
-// Convert CONFIG_FILES to include glob patterns
-const CONFIG_FILE_GLOBS = CONFIG_FILES.flatMap((file) => [
-  file,
-  `**/${file}`, // Match files in any subdirectory
 ]);
 
 // Add special package handlers
@@ -274,21 +228,116 @@ async function getDependencies(packageJsonPath: string): Promise<string[]> {
   ];
 }
 
-// Function to collect all source files
+// Add these helper functions
+function isConfigFile(filePath: string): boolean {
+  const filename = path.basename(filePath).toLowerCase();
+  return (
+    filename.includes('config') ||
+    filename.startsWith('.') ||
+    filename === 'package.json' ||
+    /\.(config|rc)(\.|\b)/.test(filename)
+  );
+}
+
+async function parseConfigFile(filePath: string): Promise<unknown> {
+  const extension = path.extname(filePath).toLowerCase();
+  const content = await fs.readFile(filePath, 'utf8');
+
+  try {
+    switch (extension) {
+      case '.json': {
+        return JSON.parse(content);
+      }
+      case '.yaml':
+      case '.yml': {
+        const yaml = await import('yaml').catch(() => null);
+        return yaml ? yaml.parse(content) : content;
+      }
+      case '.js':
+      case '.cjs':
+      case '.mjs': {
+        // For JS files, return the raw content as we can't safely eval
+        return content;
+      }
+      default: {
+        // For unknown extensions, try JSON parse first, then return raw content
+        try {
+          return JSON.parse(content);
+        } catch {
+          return content;
+        }
+      }
+    }
+  } catch {
+    // If parsing fails, return the raw content
+    return content;
+  }
+}
+
+// Update getSourceFiles function
 async function getSourceFiles(
   projectDirectory: string,
   ignorePatterns: string[] = [],
 ): Promise<string[]> {
-  const files = await globby(
-    ['**/*.{js,jsx,ts,tsx}', 'package.json', ...CONFIG_FILE_GLOBS],
-    {
-      cwd: projectDirectory,
-      gitignore: true,
-      ignore: ['node_modules', 'dist', 'coverage', ...ignorePatterns],
-      absolute: true,
+  const files = await globby(['**/*'], {
+    cwd: projectDirectory,
+    gitignore: true,
+    ignore: [
+      'node_modules',
+      'dist',
+      'coverage',
+      'build',
+      '.git',
+      '*.log',
+      '*.lock',
+      ...ignorePatterns,
+    ],
+    absolute: true,
+  });
+
+  // Filter out binary files and return
+  return files.filter((file) => !isBinaryFileSync(file));
+}
+
+// Update getPackageContext function
+async function getPackageContext(
+  packageJsonPath: string,
+): Promise<DependencyContext> {
+  const projectDir = path.dirname(packageJsonPath);
+  const configs: Record<string, any> = {};
+
+  // Read all files in the project
+  const allFiles = await getSourceFiles(projectDir);
+
+  // Process config files
+  for (const file of allFiles) {
+    if (isConfigFile(file)) {
+      const relativePath = path.relative(projectDir, file);
+      try {
+        configs[relativePath] = await parseConfigFile(file);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }
+
+  // Get package.json content
+  const packageJsonBuffer = await fs.readFile(packageJsonPath);
+  const packageJson = JSON.parse(
+    packageJsonBuffer.toString(),
+  ) as PackageJson & {
+    eslintConfig?: { extends?: string | string[] };
+    prettier?: unknown;
+    stylelint?: { extends?: string | string[] };
+  };
+
+  return {
+    scripts: packageJson.scripts,
+    configs: {
+      'package.json': packageJson,
+      ...configs,
     },
-  );
-  return files;
+  };
 }
 
 // Add a helper function to check if a type package corresponds to an installed package
@@ -347,74 +396,124 @@ async function isTypePackageUsed(
   return { isUsed: false };
 }
 
-// Enhanced package context retrieval
-async function getPackageContext(
-  packageJsonPath: string,
-): Promise<DependencyContext> {
-  const buffer = await fs.readFile(packageJsonPath);
-  const package_ = JSON.parse(buffer.toString()) as PackageJson & {
-    eslintConfig?: { extends?: string | string[] };
-    prettier?: string;
-    stylelint?: { extends?: string | string[] };
-  };
+// Add helper function to recursively scan objects for dependency usage
+// Add dependency pattern helpers
+interface DependencyPattern {
+  type: 'exact' | 'prefix' | 'suffix' | 'combined' | 'regex';
+  match: string | RegExp;
+  variations?: string[];
+}
 
-  // Store package.json directly in configs
-  const configs: Record<string, any> = { 'package.json': package_ };
+const COMMON_PATTERNS: DependencyPattern[] = [
+  // Direct matches
+  { type: 'exact', match: '' }, // Base name
+  { type: 'prefix', match: '@' }, // Scoped packages
 
-  // Load external config files
-  for (const file of CONFIG_FILE_GLOBS) {
-    const configPath = path.join(path.dirname(packageJsonPath), file);
-    try {
-      if (
-        await fs
-          .access(configPath)
-          .then(() => true)
-          .catch(() => false)
-      ) {
-        if (file.endsWith('.json')) {
-          const contentBuffer = await fs.readFile(configPath);
-          configs[file] = JSON.parse(contentBuffer.toString());
-        } else if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-          const yaml = await import('yaml').catch(() => null);
-          if (yaml) {
-            const content = await fs.readFile(configPath, 'utf8');
-            configs[file] = yaml.parse(content);
-          }
-        } else if (file.endsWith('.js') || file.endsWith('.ts')) {
-          const content = await fs.readFile(configPath, 'utf8');
-          configs[file] = content;
-        } else {
-          const config = await import(configPath).catch(() => ({}));
-          configs[file] = config.default || config;
-        }
+  // Common package organization patterns
+  { type: 'prefix', match: '@types/' },
+  { type: 'prefix', match: '@storybook/' },
+  { type: 'prefix', match: '@testing-library/' },
+
+  // Config patterns
+  {
+    type: 'suffix',
+    match: 'config',
+    variations: ['rc', 'settings', 'configuration', 'setup', 'options'],
+  },
+
+  // Plugin patterns
+  {
+    type: 'suffix',
+    match: 'plugin',
+    variations: ['plugins', 'extension', 'extensions', 'addon', 'addons'],
+  },
+
+  // Preset patterns
+  {
+    type: 'suffix',
+    match: 'preset',
+    variations: ['presets', 'recommended', 'standard', 'defaults'],
+  },
+
+  // Tool patterns
+  {
+    type: 'combined',
+    match: '',
+    variations: ['cli', 'core', 'utils', 'tools', 'helper', 'helpers'],
+  },
+
+  // Framework integration patterns
+  {
+    type: 'regex',
+    match: /[/-](react|vue|svelte|angular|node)$/i,
+  },
+
+  // Common package naming patterns
+  {
+    type: 'regex',
+    match: /[/-](loader|parser|transformer|formatter|linter|compiler)s?$/i,
+  },
+];
+
+function generatePatternMatcher(dependency: string): RegExp[] {
+  const patterns: RegExp[] = [];
+  const escapedDep = dependency.replaceAll(
+    /[$()*+.?[\\\]^{|}]/g,
+    String.raw`\$&`,
+  );
+
+  for (const pattern of COMMON_PATTERNS) {
+    switch (pattern.type) {
+      case 'exact': {
+        patterns.push(new RegExp(`^${escapedDep}$`));
+        break;
       }
-    } catch {
-      // Ignore config load errors
+      case 'prefix': {
+        patterns.push(new RegExp(`^${pattern.match}${escapedDep}(/.*)?$`));
+        break;
+      }
+      case 'suffix': {
+        const suffixes = [pattern.match, ...(pattern.variations || [])];
+        for (const suffix of suffixes) {
+          patterns.push(
+            new RegExp(`^${escapedDep}[-./]${suffix}$`),
+            new RegExp(`^${escapedDep}[-./]${suffix}s$`),
+          );
+        }
+        break;
+      }
+      case 'combined': {
+        const parts = [pattern.match, ...(pattern.variations || [])];
+        for (const part of parts) {
+          patterns.push(
+            new RegExp(`^${escapedDep}[-./]${part}$`),
+            new RegExp(`^${part}[-./]${escapedDep}$`),
+          );
+        }
+        break;
+      }
+      case 'regex': {
+        if (pattern.match instanceof RegExp) {
+          patterns.push(
+            new RegExp(
+              `^${escapedDep}${pattern.match.source}`,
+              pattern.match.flags,
+            ),
+          );
+        }
+        break;
+      }
     }
   }
 
-  return {
-    scripts: package_.scripts,
-    configs,
-  };
+  return patterns;
 }
 
-// Add helper function to recursively scan objects for dependency usage
+// Replace the old scanForDependency function
 function scanForDependency(object: unknown, dependency: string): boolean {
   if (typeof object === 'string') {
-    return (
-      object === dependency ||
-      object === `@${dependency}` ||
-      object.startsWith(`${dependency}/`) ||
-      object.startsWith(`@${dependency}/`) ||
-      // Handle common config patterns
-      object === `${dependency}/config` ||
-      object === `@${dependency}/config` ||
-      object === `${dependency}-config` ||
-      object === `@${dependency}/eslint-config` ||
-      object === `@${dependency}/prettier-config` ||
-      object === `@${dependency}/stylelint-config`
-    );
+    const matchers = generatePatternMatcher(dependency);
+    return matchers.some((pattern) => pattern.test(object));
   }
 
   if (Array.isArray(object)) {
@@ -708,9 +807,32 @@ async function detectPackageManager(projectDirectory: string): Promise<string> {
   return 'npm';
 }
 
+// Add these variables before the main function
+let activeSpinner: Ora | null = null;
+let activeProgressBar: cliProgress.SingleBar | null = null;
+let activeReadline: readline.Interface | null = null;
+
+// Add this function before the main function
+function cleanup(): void {
+  if (activeSpinner) {
+    activeSpinner.stop();
+  }
+  if (activeProgressBar) {
+    activeProgressBar.stop();
+  }
+  if (activeReadline) {
+    activeReadline.close();
+  }
+  process.exit(0);
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
+    // Add signal handlers at the start of main
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+
     const program = new Command();
 
     program
@@ -742,6 +864,7 @@ async function main(): Promise<void> {
       text: 'Analyzing dependencies...',
       spinner: 'dots',
     }).start();
+    activeSpinner = spinner;
 
     process.on('uncaughtException', (error: Error): void => {
       spinner.fail('Analysis failed');
@@ -774,6 +897,7 @@ async function main(): Promise<void> {
       barCompleteChar: '\u2588',
       barIncompleteChar: '\u2591',
     });
+    activeProgressBar = progressBar;
 
     if (!program.opts().noProgress) {
       progressBar.start(totalFiles, 0);
@@ -869,6 +993,7 @@ async function main(): Promise<void> {
 
       // Prompt to remove dependencies
       const rl = readline.createInterface({ input, output });
+      activeReadline = rl;
 
       // Detect package manager once
       const packageManager = await detectPackageManager(projectDirectory);
@@ -905,13 +1030,22 @@ async function main(): Promise<void> {
         console.log(chalk.blue('\nNo changes made.'));
       }
       rl.close();
+      activeReadline = null;
     } else {
       console.log(chalk.green('No unused dependencies found.'));
     }
   } catch (error) {
+    cleanup();
     console.error(chalk.red('\nFatal error:'), error);
     process.exit(1);
   }
 }
 
-await main();
+// Wrap the main call in a try/catch
+try {
+  await main();
+} catch (error) {
+  cleanup();
+  console.error(chalk.red('\nUnexpected error:'), error);
+  process.exit(1);
+}
