@@ -1,0 +1,33 @@
+# Source
+src/
+tests/
+coverage/
+.github/
+.vscode/
+
+# Config files
+.eslintrc*
+.prettier*
+jest.config.*
+tsconfig.*
+.editorconfig
+.gitignore
+.npmrc
+
+# Logs and temp files
+*.log
+.DS_Store
+tmp/
+
+# Development files
+docs/
+examples/
+scripts/
+
+# Source maps
+*.map
+
+# Test files
+__tests__/
+*.test.*
+*.spec.*
