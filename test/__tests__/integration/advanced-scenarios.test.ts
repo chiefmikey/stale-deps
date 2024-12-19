@@ -1,13 +1,39 @@
+import { exec } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
 import { analyzeDependencies } from '../../analyzer';
 import { mockProjectRoot } from '../../setup';
 
+const execAsync = promisify(exec);
+
+// Mock CLI execution instead of using the actual CLI
+const runCLI = async (arguments_: string, cwd: string) => {
+  try {
+    const { stdout } = await execAsync(`node ../../src/cli.js ${arguments_}`, {
+      cwd,
+      env: { ...process.env, NODE_ENV: 'test' },
+    });
+    return stdout;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('CLI execution failed');
+  }
+};
+
 describe('advanced Scenarios', () => {
   beforeEach(async () => {
+    await fs.mkdir(path.join(mockProjectRoot, 'node_modules/pkg-a'), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(mockProjectRoot, 'node_modules/pkg-b'), {
+      recursive: true,
+    });
     await fs.rm(mockProjectRoot, { recursive: true, force: true });
     await fs.mkdir(mockProjectRoot, { recursive: true });
   });
@@ -48,6 +74,11 @@ describe('advanced Scenarios', () => {
     expect(results.warnings).toContainEqual(
       expect.objectContaining({ type: 'CircularDependency' }),
     );
+
+    // Verify CLI output matches analysis
+    const cliOutput = await runCLI('--analyze', mockProjectRoot);
+
+    expect(cliOutput).toContain('Circular dependency detected');
   });
 
   it('should handle peer dependency conflicts', async () => {

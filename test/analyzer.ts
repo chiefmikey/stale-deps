@@ -59,6 +59,8 @@ function getEmptyResult(): AnalysisResult {
     resolvedDependencies: {},
     overriddenDependencies: [],
     versionRanges: {},
+    inheritedDependencies: [],
+    localDependencies: [],
     packages: [],
     vulnerabilities: [],
   };
@@ -174,6 +176,16 @@ export async function analyzeDependencies(
       });
       return result;
     }
+
+    // Local dependencies from the current package.json
+    result.localDependencies = Object.keys(package_.dependencies || {});
+
+    // Inherited dependencies from parent package.json
+    const parentPackageJsonPath = path.join(projectRoot, '..', 'package.json');
+    const parentPackage_ = await readPackageJson(parentPackageJsonPath);
+    result.inheritedDependencies = parentPackage_
+      ? Object.keys(parentPackage_.dependencies || {})
+      : [];
 
     // Check for circular dependencies
     const circular = await detectCircularDependencies(projectRoot);

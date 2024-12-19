@@ -46,4 +46,6 @@ export interface AnalysisResult {
   versionRanges: Record<string, string>;
   packages: string[];
   vulnerabilities: { package: string }[];
+  inheritedDependencies: string[];
+  localDependencies: string[];
 }

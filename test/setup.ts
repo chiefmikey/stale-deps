@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
-export const mockProjectRoot = path.resolve('test/__fixtures__/test-project');
+export const mockProjectRoot = path.join(os.tmpdir(), 'stale-deps-test');
+
+// Global setup function for Jest
+export default async function setup(): Promise<void> {
+  await fs.mkdir(mockProjectRoot, { recursive: true });
+}
 
 export const setupTestEnvironment = (): string => {
   return mockProjectRoot;
@@ -136,14 +142,22 @@ export const cleanupMockProject = async (): Promise<void> => {
   await fs.rm(mockProjectRoot, { recursive: true, force: true });
 };
 
-beforeAll(async () => {
-  await createMockProject();
-});
+export async function setupMockCLI(): Promise<void> {
+  const cliDirectory = path.join(__dirname, '..', 'src');
+  await fs.mkdir(cliDirectory, { recursive: true });
 
-beforeEach(async () => {
-  await setupTestProject();
-});
+  const mockCLI = `
+    #!/usr/bin/env node
+    const { analyzeDependencies } = require('./analyzer');
 
-afterAll(async () => {
-  await cleanupMockProject();
-});
+    async function main() {
+      const result = await analyzeDependencies(process.cwd());
+      console.log(JSON.stringify(result, null, 2));
+    }
+
+    main().catch(console.error);
+  `;
+
+  await fs.writeFile(path.join(cliDirectory, 'cli.js'), mockCLI);
+  await fs.chmod(path.join(cliDirectory, 'cli.js'), '755');
+}
