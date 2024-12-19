@@ -64,45 +64,6 @@ const ESSENTIAL_PACKAGES = new Set([
   'eslint',
 ]);
 
-// Add special package handlers
-const SPECIAL_PACKAGES = new Map<string, (content: string) => boolean>([
-  ['webpack', (content: string): boolean => content.includes('webpack.config')],
-  [
-    'babel',
-    (content: string): boolean =>
-      content.includes('babel.config') || content.includes('.babelrc'),
-  ],
-  [
-    'eslint',
-    (content: string): boolean =>
-      content.includes('.eslintrc') ||
-      content.includes('eslintConfig') ||
-      content.includes('eslint.config'),
-  ],
-  [
-    'jest',
-    (content: string): boolean =>
-      content.includes('jest.config') || content.includes('jest.setup'),
-  ],
-  ['postcss', (content: string): boolean => content.includes('postcss.config')],
-  [
-    'tailwindcss',
-    (content: string): boolean => content.includes('tailwind.config'),
-  ],
-  ['rollup', (content: string): boolean => content.includes('rollup.config')],
-  [
-    'prettier',
-    (content: string): boolean =>
-      content.includes('.prettierrc') || content.includes('prettier.config'),
-  ],
-  [
-    'tsconfig-paths',
-    (content: string): boolean => content.includes('tsconfig'),
-  ],
-  ['type-fest', (): boolean => true],
-  ['@types/', (): boolean => true],
-]);
-
 // Add raw content patterns
 const RAW_CONTENT_PATTERNS = new Map([
   ['webpack', ['webpack.*', 'webpack-*']],
@@ -303,16 +264,16 @@ async function getSourceFiles(
 async function getPackageContext(
   packageJsonPath: string,
 ): Promise<DependencyContext> {
-  const projectDir = path.dirname(packageJsonPath);
+  const projectDirectory = path.dirname(packageJsonPath);
   const configs: Record<string, any> = {};
 
   // Read all files in the project
-  const allFiles = await getSourceFiles(projectDir);
+  const allFiles = await getSourceFiles(projectDirectory);
 
   // Process config files
   for (const file of allFiles) {
     if (isConfigFile(file)) {
-      const relativePath = path.relative(projectDir, file);
+      const relativePath = path.relative(projectDirectory, file);
       try {
         configs[relativePath] = await parseConfigFile(file);
       } catch {
@@ -607,37 +568,39 @@ async function isDependencyUsedInFile(
 
       let isUsed = false;
       traverseFunction(ast, {
-        ImportDeclaration(path: NodePath<ImportDeclaration>) {
-          const importSource = path.node.source.value;
+        ImportDeclaration(importPath: NodePath<ImportDeclaration>) {
+          const importSource = importPath.node.source.value;
           if (matchesDependency(importSource, dependency)) {
             isUsed = true;
-            path.stop();
+            importPath.stop();
           }
         },
-        CallExpression(path: NodePath<CallExpression>) {
+        CallExpression(importPath: NodePath<CallExpression>) {
           if (
-            path.node.callee.type === 'Identifier' &&
-            path.node.callee.name === 'require' &&
-            path.node.arguments[0]?.type === 'StringLiteral' &&
-            matchesDependency(path.node.arguments[0].value, dependency)
+            importPath.node.callee.type === 'Identifier' &&
+            importPath.node.callee.name === 'require' &&
+            importPath.node.arguments[0]?.type === 'StringLiteral' &&
+            matchesDependency(importPath.node.arguments[0].value, dependency)
           ) {
             isUsed = true;
-            path.stop();
+            importPath.stop();
           }
         },
         // Add handlers for TypeScript type-only imports
-        TSImportType(path: NodePath<TSImportType>) {
-          const importSource = path.node.argument.value;
+        TSImportType(importPath: NodePath<TSImportType>) {
+          const importSource = importPath.node.argument.value;
           if (matchesDependency(importSource, dependency)) {
             isUsed = true;
-            path.stop();
+            importPath.stop();
           }
         },
-        TSExternalModuleReference(path: NodePath<TSExternalModuleReference>) {
-          const importSource = path.node.expression.value;
+        TSExternalModuleReference(
+          importPath: NodePath<TSExternalModuleReference>,
+        ) {
+          const importSource = importPath.node.expression.value;
           if (matchesDependency(importSource, dependency)) {
             isUsed = true;
-            path.stop();
+            importPath.stop();
           }
         },
       });
@@ -1045,7 +1008,7 @@ async function main(): Promise<void> {
 async function init(): Promise<void> {
   try {
     // Handle exit signals at the top level
-    const exitHandler = (signal: string) => {
+    const exitHandler = (signal: string): void => {
       console.log(`\n${signal} received. Cleaning up...`);
       cleanup();
       // Exit without error since this is an intentional exit
@@ -1053,8 +1016,12 @@ async function init(): Promise<void> {
     };
 
     // Handle both SIGINT (Ctrl+C) and SIGTERM
-    process.on('SIGINT', () => exitHandler('SIGINT'));
-    process.on('SIGTERM', () => exitHandler('SIGTERM'));
+    process.on('SIGINT', () => {
+      exitHandler('SIGINT');
+    });
+    process.on('SIGTERM', () => {
+      exitHandler('SIGTERM');
+    });
 
     await main();
   } catch (error) {
