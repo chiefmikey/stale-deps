@@ -1,6 +1,6 @@
 # stale-deps 🧹
 
-> Intelligent dependency cleanup for JavaScript/TypeScript projects
+> Automated intelligent dependency cleanup for JavaScript/TypeScript projects
 
 [![npm version](https://img.shields.io/npm/v/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
 [![Downloads](https://img.shields.io/npm/dm/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
@@ -11,14 +11,23 @@ TypeScript projects with confidence.
 
 ## Features
 
-- 🔍 Smart detection of unused dependencies
-- 🎯 Precise AST-based analysis
-- 🚀 Support for modern JS/TS features
-- 📦 Works with npm, yarn, and pnpm
-- 🛡️ Safe mode to protect essential packages
-- 🏗️ Monorepo support
+- 🔍 **Smart Detection**: Analyzes your codebase to find unused dependencies.
+- 🎯 **AST-Based Analysis**: Uses Abstract Syntax Tree parsing for precise
+  detection.
+- 🚀 **Modern JS/TS Support**: Supports the latest JavaScript and TypeScript
+  features.
+- 📦 **Package Manager Compatibility**: Works with npm, yarn, and pnpm.
+- 🛡️ **Safe Mode**: Prevents accidental removal of essential packages.
+- 🏗️ **Monorepo Support**: Seamlessly handles projects within monorepos.
+- ⚡ **Efficient Processing**: Utilizes parallel processing for faster analysis.
+- 🧩 **Config File Scanning**: Detects dependencies used in configuration files.
+- 🔧 **Customizable Ignoring**: Allows specifying patterns to exclude from
+  scanning.
+- 🧠 **Memory Management**: Efficiently manages memory usage during analysis.
 
 ## Installation
+
+### Global Installation
 
 ```bash
 # Using npm
@@ -29,6 +38,19 @@ yarn global add stale-deps
 
 # Using pnpm
 pnpm add -g stale-deps
+```
+
+### One-off Usage
+
+```bash
+# Using npx
+npx stale-deps
+
+# Using yarn
+yarn dlx stale-deps
+
+# Using pnpm
+pnpm dlx stale-deps
 ```
 
 ## Usage
@@ -44,10 +66,10 @@ stale-deps
 ```
 Options:
   -v, --verbose          Display detailed usage information
-  -i, --ignore <paths>   Patterns to ignore
-  --safe                 Prevent removing essential packages
+  -i, --ignore <paths>   Patterns to ignore during scanning
+  --safe                 Enable safe mode to protect essential packages
   --dry-run              Show what would be removed without making changes
-  --no-progress          Disable progress bar
+  --no-progress          Disable the progress bar
   -h, --help             Display help information
 ```
 
@@ -60,36 +82,55 @@ stale-deps --verbose
 # Run in safe mode
 stale-deps --safe
 
-# Ignore specific patterns
+# Ignore specific directories or files
 stale-deps -i "test/**" "scripts/**"
 
-# Preview changes without removing
+# Preview changes without removing dependencies
 stale-deps --dry-run
 ```
 
 ## How It Works
 
-stale-deps performs:
+`stale-deps` performs a comprehensive analysis of your project to identify and
+remove unused dependencies:
 
-1. Deep dependency analysis using AST parsing
-2. Smart detection of imports and requires
-3. Configuration file scanning
-4. Special package handling
-5. Memory-efficient parallel processing
+1. **Deep Dependency Analysis**: Scans your codebase using AST parsing for
+   accurate detection. This ensures that all import and require statements are
+   correctly identified, even in complex scenarios.
+2. **Smart Import Detection**: Handles various import patterns, including
+   dynamic imports. This allows `stale-deps` to detect dependencies that are
+   conditionally loaded or imported using non-standard methods.
+3. **Configuration File Parsing**: Analyzes configuration files to find
+   additional dependencies. This includes parsing JSON, YAML, and JavaScript
+   configuration files to ensure all dependencies are accounted for.
+4. **Monorepo Awareness**: Detects monorepo structures and adjusts analysis
+   accordingly. This ensures that dependencies used across multiple packages in
+   a monorepo are correctly identified and not mistakenly marked as unused.
+5. **Essential Package Protection**: Prevents removal of critical packages when
+   in safe mode. This feature ensures that essential development tools and
+   libraries are not accidentally removed.
+6. **Efficient Processing**: Leverages parallel processing for faster execution.
+   By processing files in parallel, `stale-deps` can analyze large codebases
+   more quickly and efficiently.
+7. **Memory Management**: Monitors and manages memory usage during analysis to
+   prevent crashes. This ensures that the tool can handle large projects without
+   running out of memory.
 
 ## Supported Features
 
 - ✅ ES Modules and CommonJS
 - ✅ TypeScript and JSX
-- ✅ Dynamic imports
-- ✅ Config file dependencies
-- ✅ Workspace packages
-- ✅ Binary file detection
-- ✅ Essential package protection
+- ✅ Dynamic Imports
+- ✅ Configuration Files
+- ✅ Workspace Packages
+- ✅ Binary File Detection
+- ✅ Essential Package Protection
+- ✅ Monorepo Support
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a pull request or open an
+issue.
 
 ## License
 
