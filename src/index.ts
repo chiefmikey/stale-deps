@@ -842,6 +842,11 @@ async function main(): Promise<void> {
     });
 
     const dependencies = await getDependencies(packageJsonPath);
+    dependencies.sort((a, b) =>
+      a
+        .replace(/^@/, '')
+        .localeCompare(b.replace(/^@/, ''), 'en', { sensitivity: 'base' }),
+    );
     const sourceFiles = await getSourceFiles(
       projectDirectory,
       options.ignore || [],
@@ -921,6 +926,12 @@ async function main(): Promise<void> {
     unusedDependencies = typePackageUsageResults
       .filter((result) => !result.isUsed)
       .map((result) => result.dep);
+
+    unusedDependencies.sort((a, b) =>
+      a
+        .replace(/^@/, '')
+        .localeCompare(b.replace(/^@/, ''), 'en', { sensitivity: 'base' }),
+    );
 
     if (options.verbose) {
       const table = new CliTable({
