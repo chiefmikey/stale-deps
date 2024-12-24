@@ -38,8 +38,9 @@
   "exclude": [
     "node_modules",
     "dist",
-    "test",
-    "**/*.test.ts"
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "jest.config.*.ts"
   ],
   "ts-node": {
     "esm": true,

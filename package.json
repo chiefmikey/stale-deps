@@ -9,11 +9,12 @@
     "npm": ">=7.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "major": "npm version major; cd dist && npm version major",
     "minor": "npm version minor; cd dist && npm version minor",
     "ncu": "ncu -u; cd dist && ncu -u;",
     "start": "node dist/index.js",
+    "pretest": "npm run build",
     "test": "jest",
     "test:coverage": "jest --coverage",
     "test:e2e": "jest --config jest.config.e2e.ts",
@@ -23,7 +24,7 @@
   "dependencies": {
     "@babel/parser": "^7.26.3",
     "@babel/traverse": "^7.26.4",
-    "chalk": "^5.4.0",
+    "chalk": "^5.4.1",
     "cli-progress": "^3.12.0",
     "cli-table3": "^0.6.5",
     "commander": "^12.1.0",

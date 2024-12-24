@@ -2,6 +2,7 @@ const mockFiles = new Map([
   [
     '/fake/path/package.json',
     JSON.stringify({
+      name: 'test-package',
       dependencies: {
         'test-dep': '1.0.0',
       },
