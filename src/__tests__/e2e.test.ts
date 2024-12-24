@@ -1,18 +1,29 @@
 import { execSync } from 'node:child_process';
-
-import { describe, expect, it } from '@jest/globals';
+import path from 'node:path';
+import { beforeAll, describe, expect, it } from '@jest/globals';
 
 describe('e2E Test', () => {
-  it('should pass', () => {
-    expect.hasAssertions();
-    expect(true).toBe(true);
+  const projectRoot = process.cwd();
+  const cliPath = path.resolve(projectRoot, 'dist/index.js');
+
+  beforeAll(async () => {
+    // Clean and rebuild
+    execSync('npm run build', { stdio: 'inherit' });
+    // Give the filesystem a moment to finish writing
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   });
 
   it('should show help output when run with --help', () => {
     expect.hasAssertions();
 
-    const output = execSync('node dist/index.js --help').toString();
+    const output = execSync(`node ${cliPath} --help`, {
+      env: { ...process.env, NODE_ENV: 'test' },
+      encoding: 'utf8',
+    });
 
-    expect(output).toContain('Usage:');
+    expect(output).toContain('Usage: stale-deps [options]');
+    expect(output).toContain('Options:');
+    expect(output).toContain('--help');
+    expect(output).toContain('--version');
   });
 });

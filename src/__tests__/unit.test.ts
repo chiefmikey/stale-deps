@@ -20,7 +20,11 @@ jest.mock('find-up');
 // Mock findUp to return our fake package.json path
 jest.mocked(findUp).mockResolvedValue('/fake/path/package.json');
 
-import { getSourceFiles } from '../index';
+import {
+  getSourceFiles,
+  findClosestPackageJson,
+  getDependencies,
+} from '../index';
 
 describe('getSourceFiles', () => {
   beforeAll(() => {
@@ -49,5 +53,13 @@ describe('getSourceFiles', () => {
       '/fake/path/src/index.ts',
       '/fake/path/src/utils.ts',
     ]);
+  });
+});
+
+describe('stale-deps', () => {
+  it('exports required functions', () => {
+    expect(findClosestPackageJson).toBeDefined();
+    expect(getDependencies).toBeDefined();
+    expect(getSourceFiles).toBeDefined();
   });
 });
