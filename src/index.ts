@@ -236,7 +236,7 @@ async function parseConfigFile(filePath: string): Promise<unknown> {
 }
 
 // Update getSourceFiles function
-export async function getSourceFiles(
+async function getSourceFiles(
   projectDirectory: string,
   ignorePatterns: string[] = [],
 ): Promise<string[]> {
@@ -801,7 +801,17 @@ async function main(): Promise<void> {
 
     const program = new Command();
 
+    // Configure program output and prevent exit
+    program.configureOutput({
+      writeOut: (string_) => process.stdout.write(string_),
+      writeErr: (string_) => process.stdout.write(string_),
+    });
+    program.exitOverride();
+
+    // Configure the CLI program
     program
+      .name('stale-deps')
+      .usage('[options]')
       .version('1.0.0')
       .description(
         'CLI tool that identifies and removes unused npm dependencies',
@@ -811,9 +821,27 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .parse(process.argv);
+      .addHelpText('after', '\nExample:\n  $ stale-deps --verbose');
+
+    program.exitOverride(() => {
+      // Don't throw or exit - just let the help display
+    });
+
+    // Show help immediately if --help flag is present
+    if (process.argv.includes('--help')) {
+      const helpText = program.helpInformation();
+      process.stdout.write(`${helpText}\n`);
+      process.exit(0); // Exit after displaying help
+    }
+
+    program.parse(process.argv);
 
     const options = program.opts();
+    if (options.help) {
+      program.outputHelp();
+      return;
+    }
+
     const packageJsonPath = await findClosestPackageJson(process.cwd());
 
     const projectDirectory = path.dirname(packageJsonPath);
@@ -1045,8 +1073,9 @@ async function init(): Promise<void> {
   }
 }
 
-// Run the program
 init().catch((error) => {
   console.error(chalk.red('\nFatal error:'), error);
   process.exit(1);
 });
+
+export { getSourceFiles, findClosestPackageJson, getDependencies };
