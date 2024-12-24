@@ -236,7 +236,7 @@ async function parseConfigFile(filePath: string): Promise<unknown> {
 }
 
 // Update getSourceFiles function
-async function getSourceFiles(
+export async function getSourceFiles(
   projectDirectory: string,
   ignorePatterns: string[] = [],
 ): Promise<string[]> {
@@ -786,7 +786,10 @@ function cleanup(): void {
   if (activeReadline) {
     activeReadline.close();
   }
-  process.exit(0);
+  // Only exit if not in test environment
+  if (process.env.NODE_ENV !== 'test') {
+    process.exit(0);
+  }
 }
 
 // Main execution
