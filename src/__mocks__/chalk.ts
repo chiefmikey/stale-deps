@@ -15,7 +15,10 @@ const createChainableProxy = () => {
 
 const chalk = createChainableProxy();
 
-export default chalk;
+export default {
+  red: (msg: string) => `RED: ${msg}`,
+  ...chalk,
+};
 export const supportsColor = { level: 3 };
 export const Level = { None: 0, Basic: 1, Ansi256: 2, Ansi16m: 3 };
 export const chalkStderr = createChainableProxy();
