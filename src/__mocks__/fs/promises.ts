@@ -3,24 +3,40 @@ const mockFiles = new Map([
     '/fake/path/package.json',
     JSON.stringify({
       name: 'test-package',
+      version: '1.0.0',
       dependencies: {
         'test-dep': '1.0.0',
       },
       devDependencies: {
         'test-dev-dep': '1.0.0',
       },
+      peerDependencies: {
+        'test-peer-dep': '1.0.0',
+      },
+      optionalDependencies: {
+        'test-optional-dep': '1.0.0',
+      },
+      workspaces: [], // Add workspaces if your project uses them
+      scripts: {
+        test: 'jest',
+      },
     }),
   ],
 ]);
 
-export const readFile = jest.fn(async (path: string) => {
+export async function readFile(path: string): Promise<Buffer> {
   if (mockFiles.has(path)) {
-    return mockFiles.get(path);
+    return Buffer.from(mockFiles.get(path)!, 'utf8');
   }
-  // Instead of throwing, return empty content for any file
-  return '{}';
-});
+  return Buffer.from('{}', 'utf8');
+}
 
-export const access = jest.fn().mockResolvedValue(null);
+export async function access(path: string): Promise<void> {
+  if (!mockFiles.has(path)) {
+    // Simulate file not found
+    throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+  }
+}
 
-export default { readFile, access };
+// Ensure named exports are correctly mocked
+// No default export needed for ESM

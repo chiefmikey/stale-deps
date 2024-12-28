@@ -17,6 +17,8 @@ const chalk = createChainableProxy();
 
 export default {
   red: (msg: string) => `RED: ${msg}`,
+  bold: (msg: string) => `BOLD: ${msg}`,
+  green: (msg: string) => `GREEN: ${msg}`,
   ...chalk,
 };
 export const supportsColor = { level: 3 };

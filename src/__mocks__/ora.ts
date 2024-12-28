@@ -1,10 +1,8 @@
-const mockSpinner = {
-  start: () => mockSpinner,
-  stop: () => mockSpinner,
-  succeed: () => mockSpinner,
-  fail: () => mockSpinner,
-};
+const mockOra = jest.fn(() => ({
+  start: jest.fn().mockReturnThis(),
+  stop: jest.fn(),
+  fail: jest.fn(),
+  succeed: jest.fn(),
+}));
 
-const ora = () => mockSpinner;
-
-export default ora;
+export default mockOra;

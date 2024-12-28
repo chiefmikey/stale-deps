@@ -1,1 +1,3 @@
-export const findUp = jest.fn().mockResolvedValue('/fake/path/package.json');
+export async function findUp(): Promise<string | undefined> {
+  return '/fake/path/package.json';
+}

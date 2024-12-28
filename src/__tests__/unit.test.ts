@@ -7,14 +7,16 @@ import {
   it,
   jest,
 } from '@jest/globals';
+
 import { findUp } from 'find-up';
+import ora from 'ora';
 
 // Mock modules
 jest.mock('chalk');
 jest.mock('globby');
 jest.mock('isbinaryfile');
 jest.mock('ora');
-jest.mock('fs/promises');
+jest.mock('node:fs/promises');
 jest.mock('find-up');
 
 // Mock findUp to return our fake package.json path
@@ -25,6 +27,8 @@ import {
   findClosestPackageJson,
   getDependencies,
 } from '../index';
+
+const oraMock = ora as jest.MockedFunction<typeof ora>;
 
 describe('getSourceFiles', () => {
   beforeAll(() => {
@@ -53,6 +57,10 @@ describe('getSourceFiles', () => {
       '/fake/path/src/index.ts',
       '/fake/path/src/utils.ts',
     ]);
+  });
+
+  it('should not check for spinner in getDependencies', () => {
+    getDependencies('/fake/path/package.json');
   });
 });
 

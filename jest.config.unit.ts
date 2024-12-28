@@ -14,8 +14,11 @@ export default {
     '^ora$': '<rootDir>/src/__mocks__/ora.ts',
     '^globby$': '<rootDir>/src/__mocks__/globby.ts',
     '^isbinaryfile$': '<rootDir>/src/__mocks__/isbinaryfile.ts',
-    '^find-up$': '<rootDir>/src/__mocks__/find-up.ts',
+    '^find-up$': '<rootDir>/src/__mocks__/find-up.ts', // Ensures find-up uses the mock
+    '^fs/promises$': '<rootDir>/src/__mocks__/fs/promises.ts',
+    '^node:fs/promises$': '<rootDir>/src/__mocks__/fs/promises.ts', // Ensures node:fs/promises uses the mock
     '#(.*)': '<rootDir>/node_modules/$1',
+    // Add any additional module mappings here
   },
   setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   transform: {
