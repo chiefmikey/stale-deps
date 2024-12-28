@@ -792,6 +792,32 @@ function cleanup(): void {
   }
 }
 
+// Add a helper function to fetch package size from npm
+async function getPackageSizeFromNpm(
+  packageName: string,
+): Promise<number | null> {
+  try {
+    // Minimal approach: fetch from npm registry
+    const response = await fetch(`https://registry.npmjs.org/${packageName}`);
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    // Some packages store metadata in "dist.unpackedSize" for the latest version
+    const versions = (data as { versions: Record<string, any> }).versions || {};
+    if (typeof data === 'object' && data !== null && 'dist-tags' in data) {
+      const latest = (data as { 'dist-tags': { latest: string } })['dist-tags']
+        ?.latest;
+      if (latest && versions[latest]?.dist?.unpackedSize) {
+        return versions[latest].dist.unpackedSize;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -989,6 +1015,22 @@ async function main(): Promise<void> {
       console.log(chalk.bold('Unused dependencies found:\n'));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
+      }
+
+      let totalSize = 0;
+      const sizePromises = unusedDependencies.map(async (dep) => {
+        const size = await getPackageSizeFromNpm(dep);
+        return size || 0;
+      });
+      const sizeResults = await Promise.all(sizePromises);
+      totalSize = sizeResults.reduce((acc, val) => acc + val, 0);
+
+      if (totalSize > 0) {
+        console.log(
+          chalk.bold(
+            `${MESSAGES.dataDitchedPrefix}${(totalSize / 1024).toFixed(2)} KB`,
+          ),
+        );
       }
 
       if (program.opts().dryRun) {
