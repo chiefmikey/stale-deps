@@ -64,7 +64,7 @@ describe('getSourceFiles', () => {
   });
 });
 
-describe('stale-deps', () => {
+describe('stale', () => {
   it('exports required functions', () => {
     expect(findClosestPackageJson).toBeDefined();
     expect(getDependencies).toBeDefined();
