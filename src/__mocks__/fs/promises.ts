@@ -16,7 +16,6 @@ const mockFiles = new Map([
       optionalDependencies: {
         'test-optional-dep': '1.0.0',
       },
-      workspaces: [], // Add workspaces if your project uses them
       scripts: {
         test: 'jest',
       },
@@ -37,6 +36,3 @@ export async function access(path: string): Promise<void> {
     throw new Error(`ENOENT: no such file or directory, open '${path}'`);
   }
 }
-
-// Ensure named exports are correctly mocked
-// No default export needed for ESM

@@ -33,13 +33,14 @@
     "allowArbitraryExtensions": true
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "jest.config.*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/__tests__/**",
-    "**/__mocks__/**",
+    "src/__tests__/**/*",
+    "src/__mocks__/**/*",
     "jest.config.*.ts"
   ],
   "ts-node": {
