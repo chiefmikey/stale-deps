@@ -1031,7 +1031,7 @@ async function main(): Promise<void> {
       let totalSize = 0;
       const sizePromises = unusedDependencies.map(async (dep) => {
         const size = await getPackageSizeFromNpm(dep);
-        return size || 0;
+        return size ?? 0;
       });
       const sizeResults = await Promise.all(sizePromises);
       totalSize = sizeResults.reduce((acc, val) => acc + val, 0);
