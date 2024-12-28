@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+/* eslint-disable unicorn/prefer-json-parse-buffer */
 
 import { execSync } from 'node:child_process';
-import fs from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
@@ -85,8 +86,8 @@ async function getWorkspaceInfo(
   packageJsonPath: string,
 ): Promise<WorkspaceInfo | undefined> {
   try {
-    const buffer = await fs.readFile(packageJsonPath);
-    const package_ = JSON.parse(buffer.toString()) as PackageJson;
+    const content = await fs.readFile(packageJsonPath, 'utf8');
+    const package_ = JSON.parse(content);
 
     if (!package_.workspaces) return undefined;
 
@@ -127,10 +128,11 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
     }
     const potentialRootPackageJson = path.join(parentDirectory, 'package.json');
     try {
-      const rootPackageBuffer = await fs.readFile(potentialRootPackageJson);
-      const rootPackage = JSON.parse(
-        rootPackageBuffer.toString(),
-      ) as PackageJson;
+      const rootPackageString = await fs.readFile(
+        potentialRootPackageJson,
+        'utf8',
+      );
+      const rootPackage = JSON.parse(rootPackageString);
       if (rootPackage.workspaces) {
         console.log(
           chalk.yellow('\nMonorepo detected. Using root package.json.'),
@@ -165,8 +167,9 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
 
 // Function to read dependencies from package.json
 async function getDependencies(packageJsonPath: string): Promise<string[]> {
-  const packageJsonBuffer = await fs.readFile(packageJsonPath);
-  const packageJson = JSON.parse(packageJsonBuffer.toString()) as PackageJson;
+  const packageJsonString =
+    (await fs.readFile(packageJsonPath, 'utf8')) || '{}';
+  const packageJson = JSON.parse(packageJsonString);
 
   const dependencies = packageJson.dependencies
     ? Object.keys(packageJson.dependencies)
@@ -283,10 +286,9 @@ async function getPackageContext(
   }
 
   // Get package.json content
-  const packageJsonBuffer = await fs.readFile(packageJsonPath);
-  const packageJson = JSON.parse(
-    packageJsonBuffer.toString(),
-  ) as PackageJson & {
+  const packageJsonString =
+    (await fs.readFile(packageJsonPath, 'utf8')) || '{}';
+  const packageJson = JSON.parse(packageJsonString) as PackageJson & {
     eslintConfig?: { extends?: string | string[] };
     prettier?: unknown;
     stylelint?: { extends?: string | string[] };
@@ -342,10 +344,8 @@ async function isTypePackageUsed(
       const packageJsonPath = require.resolve(`${package_}/package.json`, {
         paths: [process.cwd()],
       });
-      const packageJsonBuffer = await fs.readFile(packageJsonPath);
-      const packageJson = JSON.parse(
-        packageJsonBuffer.toString(),
-      ) as PackageJson;
+      const packageJsonBuffer = await fs.readFile(packageJsonPath, 'utf8');
+      const packageJson = JSON.parse(packageJsonBuffer);
       if (packageJson.peerDependencies?.[dependency]) {
         return { isUsed: true, supportedPackage: package_ };
       }
