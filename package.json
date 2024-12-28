@@ -1,5 +1,5 @@
 {
-  "name": "stale",
+  "name": "depsweep",
   "version": "0.0.0",
   "description": "CLI tool that identifies and removes unused dependencies",
   "main": "dist/index.js",
@@ -53,15 +53,15 @@
     "README.md"
   ],
   "bin": {
-    "stale": "dist/index.js"
+    "depsweep": "dist/index.js"
   },
-  "homepage": "https://github.com/chiefmikey/stale",
+  "homepage": "https://github.com/chiefmikey/depsweep",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chiefmikey/stale.git"
+    "url": "https://github.com/chiefmikey/depsweep.git"
   },
   "bugs": {
-    "url": "https://github.com/chiefmikey/stale/issues"
+    "url": "https://github.com/chiefmikey/depsweep/issues"
   },
   "license": "MIT",
   "keywords": [
@@ -69,7 +69,7 @@
     "cli",
     "dependencies",
     "unused",
-    "stale",
+    "depsweep",
     "package.json",
     "node"
   ],

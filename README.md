@@ -1,10 +1,10 @@
-# stale 🧹
+# depsweep 🧹
 
 > Automated intelligent dependency cleanup for JavaScript/TypeScript projects
 
-[![npm version](https://img.shields.io/npm/v/stale.svg)](https://www.npmjs.com/package/stale)
-[![Downloads](https://img.shields.io/npm/dm/stale.svg)](https://www.npmjs.com/package/stale)
-[![License](https://img.shields.io/npm/l/stale.svg)](https://github.com/chiefmikey/stale/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/depsweep.svg)](https://www.npmjs.com/package/depsweep)
+[![Downloads](https://img.shields.io/npm/dm/depsweep.svg)](https://www.npmjs.com/package/depsweep)
+[![License](https://img.shields.io/npm/l/depsweep.svg)](https://github.com/chiefmikey/depsweep/blob/main/LICENSE)
 
 Automatically detect and remove unused dependencies in your JavaScript and
 TypeScript projects with confidence.
@@ -31,26 +31,26 @@ TypeScript projects with confidence.
 
 ```bash
 # Using npm
-npm install -g stale
+npm install -g depsweep
 
 # Using yarn
-yarn global add stale
+yarn global add depsweep
 
 # Using pnpm
-pnpm add -g stale
+pnpm add -g depsweep
 ```
 
 ### One-off Usage
 
 ```bash
 # Using npx
-npx stale
+npx depsweep
 
 # Using yarn
-yarn dlx stale
+yarn dlx depsweep
 
 # Using pnpm
-pnpm dlx stale
+pnpm dlx depsweep
 ```
 
 ## Usage
@@ -58,7 +58,7 @@ pnpm dlx stale
 Run in your project directory:
 
 ```bash
-stale
+depsweep
 ```
 
 ### Options
@@ -77,28 +77,28 @@ Options:
 
 ```bash
 # Run with verbose output
-stale --verbose
+depsweep --verbose
 
 # Run in safe mode
-stale --safe
+depsweep --safe
 
 # Ignore specific directories or files
-stale -i "test/**" "scripts/**"
+depsweep -i "test/**" "scripts/**"
 
 # Preview changes without removing dependencies
-stale --dry-run
+depsweep --dry-run
 ```
 
 ## How It Works
 
-`stale` performs a comprehensive analysis of your project to identify and remove
+`depsweep` performs a comprehensive analysis of your project to identify and remove
 unused dependencies:
 
 1. **Deep Dependency Analysis**: Scans your codebase using AST parsing for
    accurate detection. This ensures that all import and require statements are
    correctly identified, even in complex scenarios.
 2. **Smart Import Detection**: Handles various import patterns, including
-   dynamic imports. This allows `stale` to detect dependencies that are
+   dynamic imports. This allows `depsweep` to detect dependencies that are
    conditionally loaded or imported using non-standard methods.
 3. **Configuration File Parsing**: Analyzes configuration files to find
    additional dependencies. This includes parsing JSON, YAML, and JavaScript
@@ -110,7 +110,7 @@ unused dependencies:
    in safe mode. This feature ensures that essential development tools and
    libraries are not accidentally removed.
 6. **Efficient Processing**: Leverages parallel processing for faster execution.
-   By processing files in parallel, `stale` can analyze large codebases more
+   By processing files in parallel, `depsweep` can analyze large codebases more
    quickly and efficiently.
 7. **Memory Management**: Monitors and manages memory usage during analysis to
    prevent crashes. This ensures that the tool can handle large projects without

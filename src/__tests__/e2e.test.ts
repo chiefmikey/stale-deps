@@ -21,7 +21,7 @@ describe('e2E Test', () => {
       encoding: 'utf8',
     });
 
-    expect(output).toContain('Usage: stale [options]');
+    expect(output).toContain('Usage: depsweep [options]');
     expect(output).toContain('Options:');
     expect(output).toContain('--help');
     expect(output).toContain('--version');

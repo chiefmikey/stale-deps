@@ -810,7 +810,7 @@ async function main(): Promise<void> {
 
     // Configure the CLI program
     program
-      .name('stale')
+      .name('depsweep')
       .usage('[options]')
       .version('1.0.0')
       .description(
@@ -821,7 +821,7 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .addHelpText('after', '\nExample:\n  $ stale --verbose');
+      .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
 
     program.exitOverride(() => {
       // Don't throw or exit - just let the help display
@@ -847,7 +847,7 @@ async function main(): Promise<void> {
     const projectDirectory = path.dirname(packageJsonPath);
     const context = await getPackageContext(packageJsonPath);
 
-    console.log(chalk.bold('\nStale Deps Analysis'));
+    console.log(chalk.bold('\ndepsweep Deps Analysis'));
     console.log(
       `Package.json found at: ${chalk.green(
         path.relative(process.cwd(), packageJsonPath),
