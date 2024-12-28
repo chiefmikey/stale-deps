@@ -27,4 +27,7 @@ jobs:
         run: npm run build
 
       - name: Run tests with coverage
-        run: npm run test:coverage
+        run: |
+          npm run test:coverage -- --coverageReporters=text-summary > coverage.txt
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          cat coverage.txt >> $GITHUB_STEP_SUMMARY
