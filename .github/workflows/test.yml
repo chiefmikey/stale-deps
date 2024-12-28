@@ -28,7 +28,9 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          npm run test:coverage -- --coverageReporters=text-summary > coverage.txt
+          npm run test:coverage -- --coverageReporters=text-summary 2>&1 \
+          | sed -n '/^=============================== Coverage summary ===============================/,/^================================================================================/p' \
+          > coverage.txt
           echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           cat coverage.txt >> $GITHUB_STEP_SUMMARY
