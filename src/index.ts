@@ -810,7 +810,7 @@ async function main(): Promise<void> {
 
     // Configure the CLI program
     program
-      .name('stale-deps')
+      .name('stale')
       .usage('[options]')
       .version('1.0.0')
       .description(
@@ -821,7 +821,7 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .addHelpText('after', '\nExample:\n  $ stale-deps --verbose');
+      .addHelpText('after', '\nExample:\n  $ stale --verbose');
 
     program.exitOverride(() => {
       // Don't throw or exit - just let the help display

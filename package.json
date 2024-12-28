@@ -1,7 +1,7 @@
 {
-  "name": "stale-deps",
+  "name": "stale",
   "version": "0.0.0",
-  "description": "CLI tool that identifies and removes unused npm dependencies",
+  "description": "CLI tool that identifies and removes unused dependencies",
   "main": "dist/index.js",
   "type": "module",
   "engines": {
@@ -53,15 +53,15 @@
     "README.md"
   ],
   "bin": {
-    "stale-deps": "dist/index.js"
+    "stale": "dist/index.js"
   },
-  "homepage": "https://github.com/chiefmikey/stale-deps",
+  "homepage": "https://github.com/chiefmikey/stale",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chiefmikey/stale-deps.git"
+    "url": "https://github.com/chiefmikey/stale.git"
   },
   "bugs": {
-    "url": "https://github.com/chiefmikey/stale-deps/issues"
+    "url": "https://github.com/chiefmikey/stale/issues"
   },
   "license": "MIT",
   "keywords": [

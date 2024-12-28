@@ -1,10 +1,10 @@
-# stale-deps 🧹
+# stale 🧹
 
 > Automated intelligent dependency cleanup for JavaScript/TypeScript projects
 
-[![npm version](https://img.shields.io/npm/v/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
-[![Downloads](https://img.shields.io/npm/dm/stale-deps.svg)](https://www.npmjs.com/package/stale-deps)
-[![License](https://img.shields.io/npm/l/stale-deps.svg)](https://github.com/chiefmikey/stale-deps/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/stale.svg)](https://www.npmjs.com/package/stale)
+[![Downloads](https://img.shields.io/npm/dm/stale.svg)](https://www.npmjs.com/package/stale)
+[![License](https://img.shields.io/npm/l/stale.svg)](https://github.com/chiefmikey/stale/blob/main/LICENSE)
 
 Automatically detect and remove unused dependencies in your JavaScript and
 TypeScript projects with confidence.
@@ -31,26 +31,26 @@ TypeScript projects with confidence.
 
 ```bash
 # Using npm
-npm install -g stale-deps
+npm install -g stale
 
 # Using yarn
-yarn global add stale-deps
+yarn global add stale
 
 # Using pnpm
-pnpm add -g stale-deps
+pnpm add -g stale
 ```
 
 ### One-off Usage
 
 ```bash
 # Using npx
-npx stale-deps
+npx stale
 
 # Using yarn
-yarn dlx stale-deps
+yarn dlx stale
 
 # Using pnpm
-pnpm dlx stale-deps
+pnpm dlx stale
 ```
 
 ## Usage
@@ -58,7 +58,7 @@ pnpm dlx stale-deps
 Run in your project directory:
 
 ```bash
-stale-deps
+stale
 ```
 
 ### Options
@@ -77,28 +77,28 @@ Options:
 
 ```bash
 # Run with verbose output
-stale-deps --verbose
+stale --verbose
 
 # Run in safe mode
-stale-deps --safe
+stale --safe
 
 # Ignore specific directories or files
-stale-deps -i "test/**" "scripts/**"
+stale -i "test/**" "scripts/**"
 
 # Preview changes without removing dependencies
-stale-deps --dry-run
+stale --dry-run
 ```
 
 ## How It Works
 
-`stale-deps` performs a comprehensive analysis of your project to identify and
-remove unused dependencies:
+`stale` performs a comprehensive analysis of your project to identify and remove
+unused dependencies:
 
 1. **Deep Dependency Analysis**: Scans your codebase using AST parsing for
    accurate detection. This ensures that all import and require statements are
    correctly identified, even in complex scenarios.
 2. **Smart Import Detection**: Handles various import patterns, including
-   dynamic imports. This allows `stale-deps` to detect dependencies that are
+   dynamic imports. This allows `stale` to detect dependencies that are
    conditionally loaded or imported using non-standard methods.
 3. **Configuration File Parsing**: Analyzes configuration files to find
    additional dependencies. This includes parsing JSON, YAML, and JavaScript
@@ -110,8 +110,8 @@ remove unused dependencies:
    in safe mode. This feature ensures that essential development tools and
    libraries are not accidentally removed.
 6. **Efficient Processing**: Leverages parallel processing for faster execution.
-   By processing files in parallel, `stale-deps` can analyze large codebases
-   more quickly and efficiently.
+   By processing files in parallel, `stale` can analyze large codebases more
+   quickly and efficiently.
 7. **Memory Management**: Monitors and manages memory usage during analysis to
    prevent crashes. This ensures that the tool can handle large projects without
    running out of memory.
