@@ -28,7 +28,20 @@ import micromatch from 'micromatch';
 import ora from 'ora';
 import type { Ora } from 'ora';
 
-// Add type imports at the top
+const MESSAGES = {
+  noPackageJson: 'No package.json found.',
+  monorepoDetected: '\nMonorepo detected. Using root package.json.',
+  monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
+  analyzingDependencies: 'Analyzing dependencies...',
+  analysisComplete: 'Analysis complete!',
+  fatalError: '\nFatal error:',
+  noUnusedDependencies: 'No unused dependencies found.',
+  unusedFound: 'Unused dependencies found:\n',
+  dataDitchedPrefix: '\n~',
+  dryRunNoChanges: '\nDry run - no changes made',
+  noChangesMade: '\nNo changes made.',
+  promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
+};
 
 // Update interface for package.json structure
 interface PackageJson {
@@ -115,7 +128,7 @@ async function getWorkspaceInfo(
 async function findClosestPackageJson(startDirectory: string): Promise<string> {
   const packageJsonPath = await findUp('package.json', { cwd: startDirectory });
   if (!packageJsonPath) {
-    console.error(chalk.red('No package.json found.'));
+    console.error(chalk.red(MESSAGES.noPackageJson));
     process.exit(1);
   }
 
@@ -134,9 +147,7 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
       );
       const rootPackage = JSON.parse(rootPackageString);
       if (rootPackage.workspaces) {
-        console.log(
-          chalk.yellow('\nMonorepo detected. Using root package.json.'),
-        );
+        console.log(chalk.yellow(MESSAGES.monorepoDetected));
         return potentialRootPackageJson;
       }
     } catch {
@@ -881,20 +892,20 @@ async function main(): Promise<void> {
     );
 
     const spinner = ora({
-      text: 'Analyzing dependencies...',
+      text: MESSAGES.analyzingDependencies,
       spinner: 'dots',
     }).start();
     activeSpinner = spinner;
 
     process.on('uncaughtException', (error: Error): void => {
       spinner.fail('Analysis failed');
-      console.error(chalk.red('\nFatal error:'), error);
+      console.error(chalk.red(MESSAGES.fatalError), error);
       process.exit(1);
     });
 
     process.on('unhandledRejection', (error: Error): void => {
       spinner.fail('Analysis failed');
-      console.error(chalk.red('\nFatal error:'), error);
+      console.error(chalk.red(MESSAGES.fatalError), error);
       process.exit(1);
     });
 
@@ -953,7 +964,7 @@ async function main(): Promise<void> {
     }
 
     progressBar.stop();
-    spinner.succeed('Analysis complete!');
+    spinner.succeed(MESSAGES.analysisComplete);
 
     // Filter out essential packages if in safe mode
     if (program.opts().safe) {
@@ -1012,7 +1023,7 @@ async function main(): Promise<void> {
 
       console.log(table.toString());
     } else if (unusedDependencies.length > 0) {
-      console.log(chalk.bold('Unused dependencies found:\n'));
+      console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
       }
@@ -1034,7 +1045,7 @@ async function main(): Promise<void> {
       }
 
       if (program.opts().dryRun) {
-        console.log(chalk.blue('\nDry run - no changes made'));
+        console.log(chalk.blue(MESSAGES.dryRunNoChanges));
         return;
       }
 
@@ -1045,9 +1056,7 @@ async function main(): Promise<void> {
       // Detect package manager once
       const packageManager = await detectPackageManager(projectDirectory);
 
-      const answer = await rl.question(
-        chalk.blue('\nDo you want to remove these dependencies? (y/N) '),
-      );
+      const answer = await rl.question(chalk.blue(MESSAGES.promptRemove));
       if (answer.toLowerCase() === 'y') {
         // Build uninstall command
         let uninstallCommand = '';
@@ -1079,7 +1088,7 @@ async function main(): Promise<void> {
       rl.close();
       activeReadline = null;
     } else {
-      console.log(chalk.green('No unused dependencies found.'));
+      console.log(chalk.green(MESSAGES.noUnusedDependencies));
     }
   } catch (error) {
     cleanup();
