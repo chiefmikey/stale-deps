@@ -1,4 +1,4 @@
-name: Publish Package
+name: Publish
 
 on:
   workflow_dispatch:
@@ -60,7 +60,7 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build package
+      - name: Build
         run: npm run build
 
       - name: Publish to NPM
