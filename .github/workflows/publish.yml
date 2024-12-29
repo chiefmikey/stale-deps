@@ -69,6 +69,12 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
+      - name: Commit version changes
+        if: steps.npm_publish.outcome == 'success'
+        run: |
+          git add package.json package-lock.json
+          git commit -m "v${{ steps.bump_version.outputs.new_version }}"
+
       - name: Push Git Changes
         if: steps.npm_publish.outcome == 'success'
         run: |
