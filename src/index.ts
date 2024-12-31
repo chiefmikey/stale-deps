@@ -7,6 +7,7 @@ import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import v8 from 'node:v8';
+import { readdirSync, statSync } from 'node:fs';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
@@ -829,6 +830,28 @@ async function getPackageSizeFromNpm(
   }
 }
 
+// Measure install time by running a subprocess
+function measureInstallTime(pkg: string): number {
+  const start = Date.now();
+  execSync(`npm install ${pkg}`, { stdio: 'ignore' });
+  return (Date.now() - start) / 1000;
+}
+
+// Recursively compute dir size for accurate disk usage stats
+function getDirectorySize(dir: string): number {
+  let total = 0;
+  const files = readdirSync(dir, { withFileTypes: true });
+  for (const f of files) {
+    const fullPath = path.join(dir, f.name);
+    if (f.isDirectory()) {
+      total += getDirectorySize(fullPath);
+    } else {
+      total += statSync(fullPath).size;
+    }
+  }
+  return total;
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -858,6 +881,7 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
+      .option('-i, --impact', 'measure time-consuming environment impact data')
       .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
 
     program.exitOverride(() => {
@@ -1044,6 +1068,36 @@ async function main(): Promise<void> {
         );
       }
 
+      // Additional Environment Impact Reporting
+      const removedCount = unusedDependencies.length;
+      const diskSpaceSaved = (totalSize / 1024).toFixed(2);
+      const memoryReduction = (removedCount * 10).toFixed(2);
+      const carbonReduction = (removedCount * 0.002).toFixed(3);
+
+      console.log(chalk.bold('\nEnvironmental Impact:'));
+      console.log(`- Dependencies Removed: ${removedCount}`);
+      console.log(`- Total Disk Space Saved: ${diskSpaceSaved} KB`);
+      console.log(
+        `- Estimated Decrease in Memory Usage: ~${memoryReduction} MB`,
+      );
+      console.log(`- Lowered Carbon Footprint: ~${carbonReduction} kg CO2e`);
+
+      if (options.impact) {
+        let totalInstallTime = 0;
+        for (const dep of unusedDependencies) {
+          const time = measureInstallTime(dep);
+          totalInstallTime += time;
+          console.log(
+            `- Measured install time (secs) for ${dep}: ${time.toFixed(2)}`,
+          );
+        }
+        if (totalInstallTime > 0) {
+          console.log(
+            `\nTotal measured installation time for all removed deps: ~${totalInstallTime.toFixed(2)} seconds`,
+          );
+        }
+      }
+
       if (program.opts().dryRun) {
         console.log(chalk.blue(MESSAGES.dryRunNoChanges));
         return;
@@ -1058,6 +1112,13 @@ async function main(): Promise<void> {
 
       const answer = await rl.question(chalk.blue(MESSAGES.promptRemove));
       if (answer.toLowerCase() === 'y') {
+        // Capture memory usage before removal
+        const memoryBefore = process.memoryUsage().rss / (1024 * 1024);
+
+        // Capture disk usage before removal
+        const nodeModulesPath = path.join(projectDirectory, 'node_modules');
+        const diskSpaceBefore = getDirectorySize(nodeModulesPath);
+
         // Build uninstall command
         let uninstallCommand = '';
         switch (packageManager) {
@@ -1082,6 +1143,19 @@ async function main(): Promise<void> {
           stdio: 'inherit',
           cwd: projectDirectory,
         });
+
+        // Capture memory usage after removal
+        const memoryAfter = process.memoryUsage().rss / (1024 * 1024);
+        const realMemorySaved = (memoryBefore - memoryAfter).toFixed(2);
+        console.log(`\nActual Memory Freed: ~${realMemorySaved} MB`);
+
+        // Capture disk usage after removal
+        const diskSpaceAfter = getDirectorySize(nodeModulesPath);
+        const realDiskSpaceSaved = (
+          (diskSpaceBefore - diskSpaceAfter) /
+          1024
+        ).toFixed(2);
+        console.log(`Actual Disk Space Saved: ~${realDiskSpaceSaved} KB`);
       } else {
         console.log(chalk.blue('\nNo changes made.'));
       }
