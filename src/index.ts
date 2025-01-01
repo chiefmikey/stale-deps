@@ -881,7 +881,7 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .option('-i, --impact', 'measure time-consuming environment impact data')
+      .option('-m, --measure', 'measure time-consuming environment impact data')
       .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
 
     program.exitOverride(() => {
@@ -1071,29 +1071,24 @@ async function main(): Promise<void> {
       // Additional Environment Impact Reporting
       const removedCount = unusedDependencies.length;
       const diskSpaceSaved = (totalSize / 1024).toFixed(2);
-      const memoryReduction = (removedCount * 10).toFixed(2);
       const carbonReduction = (removedCount * 0.002).toFixed(3);
 
       console.log(chalk.bold('\nEnvironmental Impact:'));
       console.log(`- Dependencies Removed: ${removedCount}`);
       console.log(`- Total Disk Space Saved: ${diskSpaceSaved} KB`);
-      console.log(
-        `- Estimated Decrease in Memory Usage: ~${memoryReduction} MB`,
-      );
       console.log(`- Lowered Carbon Footprint: ~${carbonReduction} kg CO2e`);
 
-      if (options.impact) {
+      if (options.measure) {
         let totalInstallTime = 0;
+        console.log(`\n- Measured install time (secs)`);
         for (const dep of unusedDependencies) {
           const time = measureInstallTime(dep);
           totalInstallTime += time;
-          console.log(
-            `- Measured install time (secs) for ${dep}: ${time.toFixed(2)}`,
-          );
+          console.log(`${dep}: ${time.toFixed(2)}`);
         }
         if (totalInstallTime > 0) {
           console.log(
-            `\nTotal measured installation time for all removed deps: ~${totalInstallTime.toFixed(2)} seconds`,
+            `Total measured installation time for all removed deps: ~${totalInstallTime.toFixed(2)} seconds`,
           );
         }
       }
