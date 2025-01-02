@@ -38,7 +38,6 @@ const MESSAGES = {
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:\n',
-  dataDitchedPrefix: '\n~',
   dryRunNoChanges: '\nDry run - no changes made',
   noChangesMade: '\nNo changes made.',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
@@ -1060,35 +1059,37 @@ async function main(): Promise<void> {
       const sizeResults = await Promise.all(sizePromises);
       totalSize = sizeResults.reduce((acc, val) => acc + val, 0);
 
-      if (totalSize > 0) {
-        console.log(
-          chalk.bold(
-            `${MESSAGES.dataDitchedPrefix}${(totalSize / 1024).toFixed(2)} KB`,
-          ),
-        );
-      }
-
       // Additional Environment Impact Reporting
       const removedCount = unusedDependencies.length;
       const diskSpaceSaved = (totalSize / 1024).toFixed(2);
       const carbonReduction = (removedCount * 0.002).toFixed(3);
 
       console.log(chalk.bold('\nEnvironmental Impact:'));
-      console.log(`- Dependencies Removed: ${removedCount}`);
-      console.log(`- Total Disk Space Saved: ${diskSpaceSaved} KB`);
-      console.log(`- Lowered Carbon Footprint: ~${carbonReduction} kg CO2e`);
+      console.log(`Dependencies Removed: ${chalk.bold(removedCount)}`);
+      console.log(
+        `Total Disk Space Saved: ${chalk.bold(diskSpaceSaved, 'KB')}`,
+      );
+      console.log(
+        `Lowered Carbon Footprint: ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
+      );
 
       if (options.measure) {
+        console.log(`\n${chalk.bold('Installation Impact:')}`);
+        const measureSpinner = ora(
+          'Measuring install time, please wait...\n',
+        ).start();
         let totalInstallTime = 0;
-        console.log(`\n- Measured install time (secs)`);
         for (const dep of unusedDependencies) {
           const time = measureInstallTime(dep);
           totalInstallTime += time;
-          console.log(`${dep}: ${time.toFixed(2)}`);
+          console.log(`${dep}: ${time.toFixed(2)}s`);
         }
+        measureSpinner.stop();
         if (totalInstallTime > 0) {
           console.log(
-            `Total measured installation time for all removed deps: ~${totalInstallTime.toFixed(2)} seconds`,
+            `Total Install Time Saved: ${chalk.bold(
+              `~${totalInstallTime.toFixed(2)}s`,
+            )}`,
           );
         }
       }
