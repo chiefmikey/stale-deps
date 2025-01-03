@@ -856,6 +856,19 @@ function getDirectorySize(dir: string): number {
   return total;
 }
 
+// Add a helper function to format bytes into human-readable strings
+function formatSize(bytes: number): string {
+  if (bytes >= 1e9) {
+    return `${(bytes / 1e9).toFixed(2)} GB`;
+  } else if (bytes >= 1e6) {
+    return `${(bytes / 1e6).toFixed(2)} MB`;
+  } else if (bytes >= 1e3) {
+    return `${(bytes / 1e3).toFixed(2)} KB`;
+  } else {
+    return `${bytes} Bytes`;
+  }
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -1066,14 +1079,14 @@ async function main(): Promise<void> {
 
       // Additional Impact Reporting
       const removedCount = unusedDependencies.length;
-      const diskSpaceSaved = (totalSize / 1024).toFixed(2);
+      const diskSpaceSaved = formatSize(totalSize);
       const carbonReduction = (removedCount * 0.002).toFixed(3);
 
       console.log(chalk.bold('\nImpact:'));
       console.log(
         `${MESSAGES.dependenciesRemoved} ${chalk.bold(removedCount)}`,
       );
-      console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved, 'KB')}`);
+      console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved)}`);
       console.log(
         `${MESSAGES.carbonFootprint} ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
       );
@@ -1098,7 +1111,7 @@ async function main(): Promise<void> {
             totalInstallTime += time;
             completedPackages++;
             console.log(
-              `${completedPackages}/${totalPackages} | ${dep}: ${time.toFixed(2)}s`,
+              `${chalk.blue(`[${completedPackages}/${totalPackages}]`)} ${dep}: ${time.toFixed(2)}s`,
             );
           } catch (error) {
             console.error(`${chalk.red('✗')} Error measuring ${dep}: ${error}`);
@@ -1165,11 +1178,8 @@ async function main(): Promise<void> {
 
         // Capture disk usage after removal
         const diskSpaceAfter = getDirectorySize(nodeModulesPath);
-        const realDiskSpaceSaved = (
-          (diskSpaceBefore - diskSpaceAfter) /
-          1024
-        ).toFixed(2);
-        console.log(`Actual Disk Space Saved: ~${realDiskSpaceSaved} KB`);
+        const realDiskSpaceSaved = formatSize(diskSpaceBefore - diskSpaceAfter);
+        console.log(`Actual Disk Space Saved: ~${realDiskSpaceSaved}`);
       } else {
         console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
       }
