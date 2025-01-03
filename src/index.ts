@@ -41,6 +41,7 @@ const MESSAGES = {
   dryRunNoChanges: '\nDry run - no changes made',
   noChangesMade: '\nNo changes made.',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
+  measureComplete: 'Measurement complete.',
 };
 
 // Update interface for package.json structure
@@ -987,7 +988,10 @@ async function main(): Promise<void> {
     }
 
     progressBar.stop();
-    spinner.succeed(MESSAGES.analysisComplete);
+    spinner.stopAndPersist({
+      symbol: '✔',
+      text: MESSAGES.analysisComplete,
+    });
 
     // Filter out essential packages if in safe mode
     if (program.opts().safe) {
@@ -1075,16 +1079,36 @@ async function main(): Promise<void> {
 
       if (options.measure) {
         console.log(`\n${chalk.bold('Installation Impact:')}`);
-        const measureSpinner = ora(
-          'Measuring install time, please wait...\n',
-        ).start();
+        const measureSpinner = ora({
+          text: 'Measuring install time, please wait...\n',
+          spinner: 'dots',
+        }).start();
+        activeSpinner = measureSpinner;
+
         let totalInstallTime = 0;
+        const measureResults: string[] = [];
+
         for (const dep of unusedDependencies) {
-          const time = measureInstallTime(dep);
+          let time = 0;
+          try {
+            time = measureInstallTime(dep);
+          } catch (error) {
+            console.error(`Error measuring install time for ${dep}:`, error);
+          }
           totalInstallTime += time;
-          console.log(`${dep}: ${time.toFixed(2)}s`);
+          measureResults.push(`${dep}: ${time.toFixed(2)}s`);
         }
-        measureSpinner.stop();
+
+        measureSpinner.stopAndPersist({
+          symbol: '✔',
+          text: MESSAGES.measureComplete,
+        });
+
+        // Print the detailed results after stopping the spinner
+        for (const result of measureResults) {
+          console.log(result);
+        }
+
         if (totalInstallTime > 0) {
           console.log(
             `Total Install Time Saved: ${chalk.bold(
