@@ -42,6 +42,9 @@ const MESSAGES = {
   noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
   measureComplete: 'Measurement complete',
+  installTime: 'Total Install Time:',
+  diskSpace: 'Total Disk Space:',
+  dependenciesRemoved: 'Dependencies:',
 };
 
 // Update interface for package.json structure
@@ -1069,10 +1072,10 @@ async function main(): Promise<void> {
       const carbonReduction = (removedCount * 0.002).toFixed(3);
 
       console.log(chalk.bold('\nEnvironmental Impact:'));
-      console.log(`Dependencies Removed: ${chalk.bold(removedCount)}`);
       console.log(
-        `Total Disk Space Saved: ${chalk.bold(diskSpaceSaved, 'KB')}`,
+        `${MESSAGES.dependenciesRemoved} ${chalk.bold(removedCount)}`,
       );
+      console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved, 'KB')}`);
       console.log(
         `Lowered Carbon Footprint: ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
       );
@@ -1110,7 +1113,7 @@ async function main(): Promise<void> {
 
         if (totalInstallTime > 0) {
           console.log(
-            `Total Install Time Saved: ${chalk.bold(
+            `${MESSAGES.installTime} ${chalk.bold(
               `~${totalInstallTime.toFixed(2)}s`,
             )}`,
           );
