@@ -34,14 +34,14 @@ const MESSAGES = {
   monorepoDetected: '\nMonorepo detected. Using root package.json.',
   monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
   analyzingDependencies: 'Analyzing dependencies...',
-  analysisComplete: 'Analysis complete!',
+  analysisComplete: 'Analysis complete',
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:\n',
   dryRunNoChanges: '\nDry run - no changes made',
-  noChangesMade: '\nNo changes made.',
+  noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
-  measureComplete: 'Measurement complete.',
+  measureComplete: 'Measurement complete',
 };
 
 // Update interface for package.json structure
@@ -1080,34 +1080,33 @@ async function main(): Promise<void> {
       if (options.measure) {
         console.log(`\n${chalk.bold('Installation Impact:')}`);
         const measureSpinner = ora({
-          text: 'Measuring install time, please wait...\n',
+          text: 'Measuring install time...',
           spinner: 'dots',
         }).start();
         activeSpinner = measureSpinner;
+        console.log('');
 
         let totalInstallTime = 0;
-        const measureResults: string[] = [];
+        const totalPackages = unusedDependencies.length;
+        let completedPackages = 0;
 
         for (const dep of unusedDependencies) {
           let time = 0;
           try {
             time = measureInstallTime(dep);
+            totalInstallTime += time;
+            measureSpinner.text = `${completedPackages + 1}/${totalPackages} | ${dep}: ${time.toFixed(2)}s`;
+            console.log(measureSpinner.text);
           } catch (error) {
-            console.error(`Error measuring install time for ${dep}:`, error);
+            console.error(`${chalk.red('✗')} Error measuring ${dep}: ${error}`);
           }
-          totalInstallTime += time;
-          measureResults.push(`${dep}: ${time.toFixed(2)}s`);
+          completedPackages++;
         }
 
         measureSpinner.stopAndPersist({
           symbol: '✔',
           text: MESSAGES.measureComplete,
         });
-
-        // Print the detailed results after stopping the spinner
-        for (const result of measureResults) {
-          console.log(result);
-        }
 
         if (totalInstallTime > 0) {
           console.log(
@@ -1177,7 +1176,7 @@ async function main(): Promise<void> {
         ).toFixed(2);
         console.log(`Actual Disk Space Saved: ~${realDiskSpaceSaved} KB`);
       } else {
-        console.log(chalk.blue('\nNo changes made.'));
+        console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
       }
       rl.close();
       activeReadline = null;
