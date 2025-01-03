@@ -34,17 +34,18 @@ const MESSAGES = {
   monorepoDetected: '\nMonorepo detected. Using root package.json.',
   monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
   analyzingDependencies: 'Analyzing dependencies...',
-  analysisComplete: 'Analysis complete',
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:\n',
   dryRunNoChanges: '\nDry run - no changes made',
   noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
+  dependenciesRemoved: 'Dependencies:',
+  diskSpace: 'Disk Space:',
+  carbonFootprint: 'Carbon Footprint:',
+  measuringInstallTime: 'Measuring install time...',
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
-  diskSpace: 'Total Disk Space:',
-  dependenciesRemoved: 'Dependencies:',
 };
 
 // Update interface for package.json structure
@@ -884,7 +885,7 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .option('-m, --measure', 'measure time-consuming environment impact data')
+      .option('-m, --measure', 'measure saved installation time')
       .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
 
     program.exitOverride(() => {
@@ -991,10 +992,7 @@ async function main(): Promise<void> {
     }
 
     progressBar.stop();
-    spinner.stopAndPersist({
-      symbol: '✔',
-      text: MESSAGES.analysisComplete,
-    });
+    spinner.stop();
 
     // Filter out essential packages if in safe mode
     if (program.opts().safe) {
@@ -1066,27 +1064,27 @@ async function main(): Promise<void> {
       const sizeResults = await Promise.all(sizePromises);
       totalSize = sizeResults.reduce((acc, val) => acc + val, 0);
 
-      // Additional Environment Impact Reporting
+      // Additional Impact Reporting
       const removedCount = unusedDependencies.length;
       const diskSpaceSaved = (totalSize / 1024).toFixed(2);
       const carbonReduction = (removedCount * 0.002).toFixed(3);
 
-      console.log(chalk.bold('\nEnvironmental Impact:'));
+      console.log(chalk.bold('\nImpact:'));
       console.log(
         `${MESSAGES.dependenciesRemoved} ${chalk.bold(removedCount)}`,
       );
       console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved, 'KB')}`);
       console.log(
-        `Lowered Carbon Footprint: ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
+        `${MESSAGES.carbonFootprint} ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
       );
 
       if (options.measure) {
-        console.log(`\n${chalk.bold('Installation Impact:')}`);
-        const measureSpinner = ora({
-          text: 'Measuring install time...',
+        console.log('');
+        const spinner = ora({
+          text: MESSAGES.measuringInstallTime,
           spinner: 'dots',
         }).start();
-        activeSpinner = measureSpinner;
+        activeSpinner = spinner;
         console.log('');
 
         let totalInstallTime = 0;
@@ -1098,26 +1096,20 @@ async function main(): Promise<void> {
           try {
             time = measureInstallTime(dep);
             totalInstallTime += time;
-            measureSpinner.text = `${completedPackages + 1}/${totalPackages} | ${dep}: ${time.toFixed(2)}s`;
-            console.log(measureSpinner.text);
+            completedPackages++;
+            console.log(
+              `${completedPackages}/${totalPackages} | ${dep}: ${time.toFixed(2)}s`,
+            );
           } catch (error) {
             console.error(`${chalk.red('✗')} Error measuring ${dep}: ${error}`);
           }
-          completedPackages++;
         }
 
-        measureSpinner.stopAndPersist({
-          symbol: '✔',
-          text: MESSAGES.measureComplete,
-        });
+        spinner.stop();
 
-        if (totalInstallTime > 0) {
-          console.log(
-            `${MESSAGES.installTime} ${chalk.bold(
-              `~${totalInstallTime.toFixed(2)}s`,
-            )}`,
-          );
-        }
+        console.log(
+          `${MESSAGES.installTime} ${chalk.bold(`~${totalInstallTime.toFixed(2)}s`)}`,
+        );
       }
 
       if (program.opts().dryRun) {
