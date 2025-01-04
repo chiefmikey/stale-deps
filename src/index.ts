@@ -7,6 +7,7 @@ import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import v8 from 'node:v8';
+import { readdirSync, statSync } from 'node:fs';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
@@ -27,20 +28,25 @@ import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
 import ora from 'ora';
 import type { Ora } from 'ora';
+import shellEscape from 'shell-escape';
 
 const MESSAGES = {
   noPackageJson: 'No package.json found.',
   monorepoDetected: '\nMonorepo detected. Using root package.json.',
   monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
   analyzingDependencies: 'Analyzing dependencies...',
-  analysisComplete: 'Analysis complete!',
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:\n',
-  dataDitchedPrefix: '\n~',
   dryRunNoChanges: '\nDry run - no changes made',
-  noChangesMade: '\nNo changes made.',
+  noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
+  dependenciesRemoved: 'Dependencies:',
+  diskSpace: 'Disk Space:',
+  carbonFootprint: 'Carbon Footprint:',
+  measuringInstallTime: 'Measuring install time...',
+  measureComplete: 'Measurement complete',
+  installTime: 'Total Install Time:',
 };
 
 // Update interface for package.json structure
@@ -829,6 +835,92 @@ async function getPackageSizeFromNpm(
   }
 }
 
+// Measure install time by running a subprocess
+function measureInstallTime(pkg: string): number {
+  if (!isValidPackageName(pkg)) {
+    throw new Error(`Invalid package name: ${pkg}`);
+  }
+  const start = Date.now();
+  safeExecSync(['npm', 'install', pkg], {
+    stdio: 'ignore',
+    cwd: process.cwd(),
+    timeout: 300000,
+  });
+  return (Date.now() - start) / 1000;
+}
+
+// Add this validation function
+function isValidPackageName(name: string): boolean {
+  return /^[@a-zA-Z0-9-_/.]+$/.test(name);
+}
+
+// Recursively compute dir size for accurate disk usage stats
+function getDirectorySize(dir: string): number {
+  let total = 0;
+  const files = readdirSync(dir, { withFileTypes: true });
+  for (const f of files) {
+    const fullPath = path.join(dir, f.name);
+    if (f.isDirectory()) {
+      total += getDirectorySize(fullPath);
+    } else {
+      total += statSync(fullPath).size;
+    }
+  }
+  return total;
+}
+
+// Add a helper function to format bytes into human-readable strings
+function formatSize(bytes: number): string {
+  if (bytes >= 1e9) {
+    return `${(bytes / 1e9).toFixed(2)} GB`;
+  } else if (bytes >= 1e6) {
+    return `${(bytes / 1e6).toFixed(2)} MB`;
+  } else if (bytes >= 1e3) {
+    return `${(bytes / 1e3).toFixed(2)} KB`;
+  } else {
+    return `${bytes} Bytes`;
+  }
+}
+
+// Add this validation at the top with other constants
+const VALID_PACKAGE_MANAGERS = new Set(['npm', 'yarn', 'pnpm']);
+
+// Add safe execution wrapper
+function safeExecSync(
+  command: string[],
+  options: {
+    cwd: string;
+    stdio?: 'inherit' | 'ignore';
+    timeout?: number;
+  },
+): void {
+  if (!Array.isArray(command) || command.length === 0) {
+    throw new Error('Invalid command array');
+  }
+
+  const [packageManager, ...args] = command;
+
+  if (!VALID_PACKAGE_MANAGERS.has(packageManager)) {
+    throw new Error(`Invalid package manager: ${packageManager}`);
+  }
+
+  // Validate all arguments
+  if (!args.every((arg) => typeof arg === 'string' && arg.length > 0)) {
+    throw new Error('Invalid command arguments');
+  }
+
+  try {
+    execSync(shellEscape(command), {
+      stdio: options.stdio || 'inherit',
+      cwd: options.cwd,
+      timeout: options.timeout || 300000,
+      encoding: 'utf8',
+    });
+  } catch (error) {
+    throw new Error(`Command execution failed: ${(error as Error).message}`);
+  }
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -858,6 +950,7 @@ async function main(): Promise<void> {
       .option('--safe', 'prevent removing essential packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
+      .option('-m, --measure', 'measure saved installation time')
       .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
 
     program.exitOverride(() => {
@@ -964,7 +1057,7 @@ async function main(): Promise<void> {
     }
 
     progressBar.stop();
-    spinner.succeed(MESSAGES.analysisComplete);
+    spinner.stop();
 
     // Filter out essential packages if in safe mode
     if (program.opts().safe) {
@@ -1036,11 +1129,51 @@ async function main(): Promise<void> {
       const sizeResults = await Promise.all(sizePromises);
       totalSize = sizeResults.reduce((acc, val) => acc + val, 0);
 
-      if (totalSize > 0) {
+      // Additional Impact Reporting
+      const removedCount = unusedDependencies.length;
+      const diskSpaceSaved = formatSize(totalSize);
+      const carbonReduction = (removedCount * 0.002).toFixed(3);
+
+      console.log(chalk.bold('\nImpact:'));
+      console.log(
+        `${MESSAGES.dependenciesRemoved} ${chalk.bold(removedCount)}`,
+      );
+      console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved)}`);
+      console.log(
+        `${MESSAGES.carbonFootprint} ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
+      );
+
+      if (options.measure) {
+        console.log('');
+        const spinner = ora({
+          text: MESSAGES.measuringInstallTime,
+          spinner: 'dots',
+        }).start();
+        activeSpinner = spinner;
+        console.log('');
+
+        let totalInstallTime = 0;
+        const totalPackages = unusedDependencies.length;
+        let completedPackages = 0;
+
+        for (const dep of unusedDependencies) {
+          let time = 0;
+          try {
+            time = measureInstallTime(dep);
+            totalInstallTime += time;
+            completedPackages++;
+            console.log(
+              `${chalk.blue(`[${completedPackages}/${totalPackages}]`)} ${dep}: ${time.toFixed(2)}s`,
+            );
+          } catch (error) {
+            console.error(`${chalk.red('✗')} Error measuring ${dep}: ${error}`);
+          }
+        }
+
+        spinner.stop();
+
         console.log(
-          chalk.bold(
-            `${MESSAGES.dataDitchedPrefix}${(totalSize / 1024).toFixed(2)} KB`,
-          ),
+          `${MESSAGES.installTime} ${chalk.bold(`~${totalInstallTime.toFixed(2)}s`)}`,
         );
       }
 
@@ -1078,12 +1211,23 @@ async function main(): Promise<void> {
           }
         }
 
-        execSync(uninstallCommand, {
-          stdio: 'inherit',
-          cwd: projectDirectory,
-        });
+        // Validate before using in execSync
+        unusedDependencies = unusedDependencies.filter(isValidPackageName);
+
+        if (unusedDependencies.length > 0) {
+          try {
+            safeExecSync([packageManager, 'uninstall', ...unusedDependencies], {
+              stdio: 'inherit',
+              cwd: projectDirectory,
+              timeout: 300000,
+            });
+          } catch (error) {
+            console.error(chalk.red('Failed to uninstall packages:'), error);
+            process.exit(1);
+          }
+        }
       } else {
-        console.log(chalk.blue('\nNo changes made.'));
+        console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
       }
       rl.close();
       activeReadline = null;
