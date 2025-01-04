@@ -841,10 +841,10 @@ function measureInstallTime(pkg: string): number {
     throw new Error(`Invalid package name: ${pkg}`);
   }
   const start = Date.now();
-  execSync(`npm install ${shellEscape([pkg])}`, {
+  safeExecSync(['npm', 'install', pkg], {
     stdio: 'ignore',
-    timeout: 300000, // 5 minute timeout
-    encoding: 'utf8',
+    cwd: process.cwd(),
+    timeout: 300000,
   });
   return (Date.now() - start) / 1000;
 }
@@ -879,6 +879,45 @@ function formatSize(bytes: number): string {
     return `${(bytes / 1e3).toFixed(2)} KB`;
   } else {
     return `${bytes} Bytes`;
+  }
+}
+
+// Add this validation at the top with other constants
+const VALID_PACKAGE_MANAGERS = new Set(['npm', 'yarn', 'pnpm']);
+
+// Add safe execution wrapper
+function safeExecSync(
+  command: string[],
+  options: {
+    cwd: string;
+    stdio?: 'inherit' | 'ignore';
+    timeout?: number;
+  },
+): void {
+  if (!Array.isArray(command) || command.length === 0) {
+    throw new Error('Invalid command array');
+  }
+
+  const [packageManager, ...args] = command;
+
+  if (!VALID_PACKAGE_MANAGERS.has(packageManager)) {
+    throw new Error(`Invalid package manager: ${packageManager}`);
+  }
+
+  // Validate all arguments
+  if (!args.every((arg) => typeof arg === 'string' && arg.length > 0)) {
+    throw new Error('Invalid command arguments');
+  }
+
+  try {
+    execSync(shellEscape(command), {
+      stdio: options.stdio || 'inherit',
+      cwd: options.cwd,
+      timeout: options.timeout || 300000,
+      encoding: 'utf8',
+    });
+  } catch (error) {
+    throw new Error(`Command execution failed: ${(error as Error).message}`);
   }
 }
 
@@ -1176,14 +1215,16 @@ async function main(): Promise<void> {
         unusedDependencies = unusedDependencies.filter(isValidPackageName);
 
         if (unusedDependencies.length > 0) {
-          execSync(
-            shellEscape([packageManager, 'uninstall', ...unusedDependencies]),
-            {
+          try {
+            safeExecSync([packageManager, 'uninstall', ...unusedDependencies], {
               stdio: 'inherit',
               cwd: projectDirectory,
-              timeout: 300000, // 5 minute timeout
-            },
-          );
+              timeout: 300000,
+            });
+          } catch (error) {
+            console.error(chalk.red('Failed to uninstall packages:'), error);
+            process.exit(1);
+          }
         }
       } else {
         console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
