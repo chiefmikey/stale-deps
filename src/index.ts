@@ -1139,13 +1139,6 @@ async function main(): Promise<void> {
 
       const answer = await rl.question(chalk.blue(MESSAGES.promptRemove));
       if (answer.toLowerCase() === 'y') {
-        // Capture memory usage before removal
-        const memoryBefore = process.memoryUsage().rss / (1024 * 1024);
-
-        // Capture disk usage before removal
-        const nodeModulesPath = path.join(projectDirectory, 'node_modules');
-        const diskSpaceBefore = getDirectorySize(nodeModulesPath);
-
         // Build uninstall command
         let uninstallCommand = '';
         switch (packageManager) {
@@ -1170,16 +1163,6 @@ async function main(): Promise<void> {
           stdio: 'inherit',
           cwd: projectDirectory,
         });
-
-        // Capture memory usage after removal
-        const memoryAfter = process.memoryUsage().rss / (1024 * 1024);
-        const realMemorySaved = (memoryBefore - memoryAfter).toFixed(2);
-        console.log(`\nActual Memory Freed: ~${realMemorySaved} MB`);
-
-        // Capture disk usage after removal
-        const diskSpaceAfter = getDirectorySize(nodeModulesPath);
-        const realDiskSpaceSaved = formatSize(diskSpaceBefore - diskSpaceAfter);
-        console.log(`Actual Disk Space Saved: ~${realDiskSpaceSaved}`);
       } else {
         console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
       }
