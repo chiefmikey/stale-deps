@@ -28,6 +28,7 @@ import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
 import ora from 'ora';
 import type { Ora } from 'ora';
+import shellEscape from 'shell-escape';
 
 const MESSAGES = {
   noPackageJson: 'No package.json found.',
@@ -836,9 +837,21 @@ async function getPackageSizeFromNpm(
 
 // Measure install time by running a subprocess
 function measureInstallTime(pkg: string): number {
+  if (!isValidPackageName(pkg)) {
+    throw new Error(`Invalid package name: ${pkg}`);
+  }
   const start = Date.now();
-  execSync(`npm install ${pkg}`, { stdio: 'ignore' });
+  execSync(`npm install ${shellEscape([pkg])}`, {
+    stdio: 'ignore',
+    timeout: 300000, // 5 minute timeout
+    encoding: 'utf8',
+  });
   return (Date.now() - start) / 1000;
+}
+
+// Add this validation function
+function isValidPackageName(name: string): boolean {
+  return /^[@a-zA-Z0-9-_/.]+$/.test(name);
 }
 
 // Recursively compute dir size for accurate disk usage stats
@@ -1159,10 +1172,19 @@ async function main(): Promise<void> {
           }
         }
 
-        execSync(uninstallCommand, {
-          stdio: 'inherit',
-          cwd: projectDirectory,
-        });
+        // Validate before using in execSync
+        unusedDependencies = unusedDependencies.filter(isValidPackageName);
+
+        if (unusedDependencies.length > 0) {
+          execSync(
+            shellEscape([packageManager, 'uninstall', ...unusedDependencies]),
+            {
+              stdio: 'inherit',
+              cwd: projectDirectory,
+              timeout: 300000, // 5 minute timeout
+            },
+          );
+        }
       } else {
         console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
       }
