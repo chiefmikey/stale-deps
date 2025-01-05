@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable unicorn/prefer-json-parse-buffer */
 
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
@@ -47,6 +47,7 @@ const MESSAGES = {
   measuringInstallTime: 'Measuring install time...',
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
+  analysisComplete: 'Analysis complete',
 };
 
 // Update interface for package.json structure
@@ -836,15 +837,23 @@ async function getPackageSizeFromNpm(
 }
 
 // Measure install time by running a subprocess
-function measureInstallTime(pkg: string): number {
+async function measureInstallTime(pkg: string): Promise<number> {
   if (!isValidPackageName(pkg)) {
     throw new Error(`Invalid package name: ${pkg}`);
   }
+
   const start = Date.now();
-  safeExecSync(['npm', 'install', pkg], {
-    stdio: 'ignore',
-    cwd: process.cwd(),
-    timeout: 300000,
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('npm', ['install', pkg], {
+      stdio: 'ignore',
+      cwd: process.cwd(),
+      timeout: 300000,
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`Install process exited with code ${code}.`));
+    });
   });
   return (Date.now() - start) / 1000;
 }
@@ -984,20 +993,12 @@ async function main(): Promise<void> {
       )}\n`,
     );
 
-    const spinner = ora({
-      text: MESSAGES.analyzingDependencies,
-      spinner: 'dots',
-    }).start();
-    activeSpinner = spinner;
-
     process.on('uncaughtException', (error: Error): void => {
-      spinner.fail('Analysis failed');
       console.error(chalk.red(MESSAGES.fatalError), error);
       process.exit(1);
     });
 
     process.on('unhandledRejection', (error: Error): void => {
-      spinner.fail('Analysis failed');
       console.error(chalk.red(MESSAGES.fatalError), error);
       process.exit(1);
     });
@@ -1017,7 +1018,7 @@ async function main(): Promise<void> {
     const dependencyUsage: Record<string, string[]> = {};
     const typePackageSupport: Record<string, string> = {};
 
-    const processedFiles = 0;
+    let processedDependencies = 0;
     const totalFiles = dependencies.length * sourceFiles.length;
 
     const progressBar = new cliProgress.SingleBar({
@@ -1036,14 +1037,18 @@ async function main(): Promise<void> {
       if (options.verbose) {
         console.log(`Checking dependency: ${dep}`);
       }
+      const offset = processedDependencies * sourceFiles.length;
       const usageFiles = await processFilesInParallel(
         sourceFiles,
         dep,
         context,
         (processed) => {
-          progressBar.update(processedFiles + processed);
+          progressBar.update(offset + processed);
         },
       );
+
+      processedDependencies++;
+      progressBar.update(processedDependencies * sourceFiles.length);
 
       if (usageFiles.length === 0) {
         if (options.verbose) {
@@ -1057,7 +1062,7 @@ async function main(): Promise<void> {
     }
 
     progressBar.stop();
-    spinner.stop();
+    console.log(chalk.green('✔'), 'Analysis complete');
 
     // Filter out essential packages if in safe mode
     if (program.opts().safe) {
@@ -1145,33 +1150,33 @@ async function main(): Promise<void> {
 
       if (options.measure) {
         console.log('');
-        const spinner = ora({
+        const measureSpinner = ora({
           text: MESSAGES.measuringInstallTime,
           spinner: 'dots',
         }).start();
-        activeSpinner = spinner;
-        console.log('');
+        activeSpinner = measureSpinner;
 
         let totalInstallTime = 0;
         const totalPackages = unusedDependencies.length;
-        let completedPackages = 0;
+        const installResults: Array<{ dep: string; time: number }> = [];
 
-        for (const dep of unusedDependencies) {
+        for (let i = 0; i < totalPackages; i++) {
+          const dep = unusedDependencies[i];
           let time = 0;
           try {
-            time = measureInstallTime(dep);
+            time = await measureInstallTime(dep);
             totalInstallTime += time;
-            completedPackages++;
-            console.log(
-              `${chalk.blue(`[${completedPackages}/${totalPackages}]`)} ${dep}: ${time.toFixed(2)}s`,
-            );
-          } catch (error) {
-            console.error(`${chalk.red('✗')} Error measuring ${dep}: ${error}`);
+            installResults.push({ dep, time });
+            measureSpinner.text = `${MESSAGES.measuringInstallTime} (${i + 1}/${totalPackages})`;
+          } catch {
+            // Ignore errors and continue
           }
         }
 
-        spinner.stop();
-
+        measureSpinner.succeed(MESSAGES.measureComplete);
+        installResults.forEach((entry) =>
+          console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`),
+        );
         console.log(
           `${MESSAGES.installTime} ${chalk.bold(`~${totalInstallTime.toFixed(2)}s`)}`,
         );
