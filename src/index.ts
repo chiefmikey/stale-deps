@@ -38,7 +38,6 @@ const MESSAGES = {
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:\n',
-  dryRunNoChanges: '\nDry run - no changes made',
   noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
@@ -976,6 +975,7 @@ async function main(): Promise<void> {
     program.parse(process.argv);
 
     const options = program.opts();
+    console.log('test', options);
     if (options.help) {
       program.outputHelp();
       return;
@@ -1021,15 +1021,15 @@ async function main(): Promise<void> {
     let processedDependencies = 0;
     const totalFiles = dependencies.length * sourceFiles.length;
 
-    const progressBar = new cliProgress.SingleBar({
-      format:
-        'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
-      barCompleteChar: '\u2588',
-      barIncompleteChar: '\u2591',
-    });
-    activeProgressBar = progressBar;
-
-    if (!program.opts().noProgress) {
+    let progressBar: cliProgress.SingleBar | null = null;
+    if (options.progress) {
+      progressBar = new cliProgress.SingleBar({
+        format:
+          'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
+        barCompleteChar: '\u2588',
+        barIncompleteChar: '\u2591',
+      });
+      activeProgressBar = progressBar;
       progressBar.start(totalFiles, 0);
     }
 
@@ -1040,12 +1040,16 @@ async function main(): Promise<void> {
         dep,
         context,
         (processed) => {
-          progressBar.update(offset + processed);
+          if (progressBar) {
+            progressBar.update(offset + processed);
+          }
         },
       );
 
       processedDependencies++;
-      progressBar.update(processedDependencies * sourceFiles.length);
+      if (progressBar) {
+        progressBar.update(processedDependencies * sourceFiles.length);
+      }
 
       if (usageFiles.length === 0) {
         unusedDependencies.push(dep);
@@ -1053,11 +1057,13 @@ async function main(): Promise<void> {
       dependencyUsage[dep] = usageFiles;
     }
 
-    progressBar.stop();
+    if (progressBar) {
+      progressBar.stop();
+    }
     console.log(chalk.green('✔'), 'Analysis complete');
 
     // Filter out essential packages if in safe mode
-    if (program.opts().safe) {
+    if (options.safe) {
       unusedDependencies = unusedDependencies.filter(
         (dep) => !ESSENTIAL_PACKAGES.has(dep),
       );
@@ -1091,29 +1097,7 @@ async function main(): Promise<void> {
         .localeCompare(b.replace(/^@/, ''), 'en', { sensitivity: 'base' }),
     );
 
-    if (options.verbose) {
-      const table = new CliTable({
-        head: ['Dependency', 'Usage'],
-        wordWrap: true,
-        colWidths: [30, 70],
-      });
-
-      for (const dep of dependencies) {
-        const usage = dependencyUsage[dep];
-        const supportInfo = typePackageSupport[dep]
-          ? ` (supports "${typePackageSupport[dep]}")`
-          : '';
-        table.push([
-          dep,
-          usage.length > 0
-            ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
-            : chalk.yellow(`Not used${supportInfo}`),
-        ]);
-      }
-
-      console.log();
-      console.log(table.toString());
-    } else if (unusedDependencies.length > 0) {
+    if (unusedDependencies.length > 0) {
       console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
@@ -1175,8 +1159,32 @@ async function main(): Promise<void> {
         );
       }
 
-      if (program.opts().dryRun) {
-        console.log(chalk.blue(MESSAGES.dryRunNoChanges));
+      if (options.verbose) {
+        const table = new CliTable({
+          head: ['Dependency', 'Usage'],
+          wordWrap: true,
+          colWidths: [30, 70],
+        });
+
+        for (const dep of dependencies) {
+          const usage = dependencyUsage[dep];
+          const supportInfo = typePackageSupport[dep]
+            ? ` (supports "${typePackageSupport[dep]}")`
+            : '';
+          table.push([
+            dep,
+            usage.length > 0
+              ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
+              : chalk.yellow(`Not used${supportInfo}`),
+          ]);
+        }
+
+        console.log();
+        console.log(table.toString());
+      }
+
+      if (options.dryRun) {
+        console.log(chalk.blue(MESSAGES.noChangesMade));
         return;
       }
 
