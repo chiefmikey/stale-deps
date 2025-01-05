@@ -950,7 +950,11 @@ async function main(): Promise<void> {
       )
       .option('-v, --verbose', 'display detailed usage information')
       .option('-i, --ignore <patterns...>', 'patterns to ignore')
-      .option('--safe', 'prevent removing essential packages')
+      .option('-a, --aggressive', 'allow removal of essential packages')
+      .option(
+        '-s, --safe <deps...>',
+        'additional dependencies to protect from removal',
+      )
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
       .option('-m, --measure', 'measure saved installation time')
@@ -970,7 +974,6 @@ async function main(): Promise<void> {
     program.parse(process.argv);
 
     const options = program.opts();
-    console.log('test', options);
     if (options.help) {
       program.outputHelp();
       return;
@@ -1078,27 +1081,39 @@ async function main(): Promise<void> {
     unusedDependencies = typePackageUsageResults
       .filter((result) => !result.isUsed)
       .map((result) => result.dep);
-    console.log('test', unusedDependencies);
 
+    // By default, run in safe mode (filter out essential packages)
+    // Only include essential packages if aggressive flag is set
     let safeUnused: string[] = [];
-    if (options.safe) {
-      safeUnused = unusedDependencies.filter((dep) =>
-        ESSENTIAL_PACKAGES.has(dep),
-      );
+
+    // Create a combined set of protected packages
+    const protectedPackages = new Set([
+      ...ESSENTIAL_PACKAGES,
+      ...(options.safe || []),
+    ]);
+
+    // In aggressive mode, only use user-specified safe deps
+    const safeSet = options.aggressive
+      ? new Set(options.safe || [])
+      : protectedPackages;
+
+    if (safeSet.size > 0) {
+      safeUnused = unusedDependencies.filter((dep) => safeSet.has(dep));
       unusedDependencies = unusedDependencies.filter(
-        (dep) => !ESSENTIAL_PACKAGES.has(dep),
+        (dep) => !safeSet.has(dep),
       );
     }
-    console.log('test', unusedDependencies);
 
     if (unusedDependencies.length > 0 || safeUnused.length > 0) {
       console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
       }
-      console.log('test', safeUnused);
       for (const dep of safeUnused) {
-        console.log(chalk.blue(`- ${dep} [safe]`));
+        const isSafeListed = options.safe?.includes(dep);
+        console.log(
+          chalk.blue(`- ${dep} [${isSafeListed ? 'safe' : 'protected'}]`),
+        );
       }
 
       let totalSize = 0;
