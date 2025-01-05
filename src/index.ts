@@ -512,11 +512,6 @@ async function isDependencyUsedInFile(
   filePath: string,
   context: DependencyContext,
 ): Promise<boolean> {
-  // Check essential packages first
-  if (ESSENTIAL_PACKAGES.has(dependency)) {
-    return true;
-  }
-
   // For package.json, do a deep scan of all configurations
   if (
     path.basename(filePath) === 'package.json' &&
@@ -1062,13 +1057,6 @@ async function main(): Promise<void> {
     }
     console.log(chalk.green('✔'), 'Analysis complete');
 
-    // Filter out essential packages if in safe mode
-    if (options.safe) {
-      unusedDependencies = unusedDependencies.filter(
-        (dep) => !ESSENTIAL_PACKAGES.has(dep),
-      );
-    }
-
     // Filter out type packages that correspond to installed packages
     const installedPackages = dependencies.filter(
       (dep) => !dep.startsWith('@types/'),
@@ -1090,17 +1078,27 @@ async function main(): Promise<void> {
     unusedDependencies = typePackageUsageResults
       .filter((result) => !result.isUsed)
       .map((result) => result.dep);
+    console.log('test', unusedDependencies);
 
-    unusedDependencies.sort((a, b) =>
-      a
-        .replace(/^@/, '')
-        .localeCompare(b.replace(/^@/, ''), 'en', { sensitivity: 'base' }),
-    );
+    let safeUnused: string[] = [];
+    if (options.safe) {
+      safeUnused = unusedDependencies.filter((dep) =>
+        ESSENTIAL_PACKAGES.has(dep),
+      );
+      unusedDependencies = unusedDependencies.filter(
+        (dep) => !ESSENTIAL_PACKAGES.has(dep),
+      );
+    }
+    console.log('test', unusedDependencies);
 
-    if (unusedDependencies.length > 0) {
+    if (unusedDependencies.length > 0 || safeUnused.length > 0) {
       console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
+      }
+      console.log('test', safeUnused);
+      for (const dep of safeUnused) {
+        console.log(chalk.blue(`- ${dep} [safe]`));
       }
 
       let totalSize = 0;
