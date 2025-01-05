@@ -1034,9 +1034,6 @@ async function main(): Promise<void> {
     }
 
     for (const dep of dependencies) {
-      if (options.verbose) {
-        console.log(`Checking dependency: ${dep}`);
-      }
       const offset = processedDependencies * sourceFiles.length;
       const usageFiles = await processFilesInParallel(
         sourceFiles,
@@ -1051,12 +1048,7 @@ async function main(): Promise<void> {
       progressBar.update(processedDependencies * sourceFiles.length);
 
       if (usageFiles.length === 0) {
-        if (options.verbose) {
-          console.log(`No usage found for: ${dep}`);
-        }
         unusedDependencies.push(dep);
-      } else if (options.verbose) {
-        console.log(`Found ${usageFiles.length} uses of ${dep}`);
       }
       dependencyUsage[dep] = usageFiles;
     }
@@ -1119,6 +1111,7 @@ async function main(): Promise<void> {
         ]);
       }
 
+      console.log();
       console.log(table.toString());
     } else if (unusedDependencies.length > 0) {
       console.log(chalk.bold(MESSAGES.unusedFound));
