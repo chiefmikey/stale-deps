@@ -1144,13 +1144,15 @@ async function main(): Promise<void> {
             time = await measureInstallTime(dep);
             totalInstallTime += time;
             installResults.push({ dep, time });
-            measureSpinner.text = `${MESSAGES.measuringInstallTime} (${i + 1}/${totalPackages})`;
+            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(`[${i + 1}/${totalPackages}]`)}`;
           } catch {
             // Ignore errors and continue
           }
         }
 
-        measureSpinner.succeed(MESSAGES.measureComplete);
+        measureSpinner.succeed(
+          `${MESSAGES.measureComplete} ${chalk.blue(`[${totalPackages}/${totalPackages}]`)}`,
+        );
         installResults.forEach((entry) =>
           console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`),
         );
