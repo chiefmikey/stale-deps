@@ -1,13 +1,10 @@
-# depsweep 🧹
+# DepSweep 🧹
 
-> Automated intelligent dependency cleanup for JavaScript/TypeScript projects
+> Automated intelligent dependency cleanup
 
 [![npm version](https://img.shields.io/npm/v/depsweep.svg)](https://www.npmjs.com/package/depsweep)
 [![Downloads](https://img.shields.io/npm/dm/depsweep.svg)](https://www.npmjs.com/package/depsweep)
 [![License](https://img.shields.io/npm/l/depsweep.svg)](https://github.com/chiefmikey/depsweep/blob/main/LICENSE)
-
-Automatically detect and remove unused dependencies in your JavaScript and
-TypeScript projects with confidence.
 
 ## Features
 
@@ -21,27 +18,24 @@ TypeScript projects with confidence.
 - 🏗️ **Monorepo Support**: Seamlessly handles projects within monorepos.
 - ⚡ **Efficient Processing**: Utilizes parallel processing for faster analysis.
 - 🧩 **Config File Scanning**: Detects dependencies used in configuration files.
-- 🔧 **Customizable Ignoring**: Allows specifying directory patterns to exclude from
-  scanning.
+- 🔧 **Customizable Ignoring**: Allows specifying directory patterns to exclude
+  from scanning.
 - 🧠 **Memory Management**: Efficiently manages memory usage during analysis.
 - 🏆 **Impact Reporting**: See the impact of removing unused dependencies.
 
-## Installation
+**Supports**:
 
-### Global Installation
+- ✅ ES Modules and CommonJS
+- ✅ TypeScript and JSX
+- ✅ Dynamic Imports
+- ✅ Configuration Files
+- ✅ Workspace Packages
+- ✅ Binary File Detection
+- ✅ Monorepos
 
-```bash
-# Using npm
-npm install -g depsweep
+## Usage
 
-# Using yarn
-yarn global add depsweep
-
-# Using pnpm
-pnpm add -g depsweep
-```
-
-### One-off Usage
+### Single Run
 
 ```bash
 # Using npx
@@ -54,21 +48,25 @@ yarn dlx depsweep
 pnpm dlx depsweep
 ```
 
-## Usage
-
-Run in your project directory:
+### Install
 
 ```bash
-depsweep
+# Using npm
+npm install -g depsweep
+
+# Using yarn
+yarn global add depsweep
+
+# Using pnpm
+pnpm add -g depsweep
 ```
 
 ### Options
 
-```
-Options:
+```bash
   -v, --verbose          Display detailed usage information
   -i, --ignore <paths>   Patterns to ignore during scanning
-  -s, --safe             Enable safe mode to protect specified packages
+  -s, --safe <deps>      Enable safe mode to protect specified packages
   -a, --aggressive       Allow removal of protected packages
   -m, --measure          Measure unused dependency install time
   --dry-run              Show what would be removed without making changes
@@ -93,42 +91,11 @@ depsweep --dry-run
 ```
 
 ## Protected Packages
-By default, a list of protected packages like `typescript` are protected to prevent accidental removal. Use
-the `-a, --aggressive` flag to override this protection. Combine with the `-s, --safe` flag to enable removal for only some protected packages.
 
-## How It Works
-
-`depsweep` performs a comprehensive analysis of your project to identify and remove
-unused dependencies:
-
-1. **Deep Dependency Analysis**: Scans your codebase using AST parsing for
-   accurate detection. This ensures that all import and require statements are
-   correctly identified, even in complex scenarios.
-2. **Smart Import Detection**: Handles various import patterns, including
-   dynamic imports. This allows `depsweep` to detect dependencies that are
-   conditionally loaded or imported using non-standard methods.
-3. **Configuration File Parsing**: Analyzes configuration files to find
-   additional dependencies. This includes parsing JSON, YAML, and JavaScript
-   configuration files to ensure all dependencies are accounted for.
-4. **Monorepo Awareness**: Detects monorepo structures and adjusts analysis
-   accordingly. This ensures that dependencies used across multiple packages in
-   a monorepo are correctly identified and not mistakenly marked as unused.
-5. **Efficient Processing**: Leverages parallel processing for faster execution.
-   By processing files in parallel, `depsweep` can analyze large codebases more
-   quickly and efficiently.
-6. **Memory Management**: Monitors and manages memory usage during analysis to
-   prevent crashes. This ensures that the tool can handle large projects without
-   running out of memory.
-
-## Supported Features
-
-- ✅ ES Modules and CommonJS
-- ✅ TypeScript and JSX
-- ✅ Dynamic Imports
-- ✅ Configuration Files
-- ✅ Workspace Packages
-- ✅ Binary File Detection
-- ✅ Monorepo Support
+A [list of protected packages](src/index.ts#L34) are ignored by default to
+prevent accidental removal. Use the `-a, --aggressive` flag to override this
+protection. Combine with the `-s, --safe` flag to enable removal for only some
+protected packages.
 
 ## Contributing
 
@@ -137,4 +104,4 @@ issue.
 
 ## License
 
-MIT © [chiefmikey](https://github.com/chiefmikey)
+MIT © [chief mikey](https://github.com/chiefmikey)
