@@ -64,12 +64,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to NPM
-        id: npm_publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
-
       - name: Commit version changes
         if: steps.npm_publish.outcome == 'success'
         run: |
@@ -93,6 +87,12 @@ jobs:
             --title "v${{ steps.bump_version.outputs.new_version }}" \
             --generate-notes
 
+      - name: Publish to NPM
+        id: npm_publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
       - name: Notify on success
         if: success()
         run: |
@@ -104,11 +104,6 @@ jobs:
         if: failure()
         run: |
           echo "::error::Deployment failed, attempting rollback..."
-
-          # Unpublish from NPM if needed
-          if [ "${{ steps.npm_publish.outcome }}" == "success" ]; then
-            npm unpublish depsweep@${{ steps.bump_version.outputs.new_version }}
-          fi
 
           # Remove local tag
           git tag -d v${{ steps.bump_version.outputs.new_version }} || true
