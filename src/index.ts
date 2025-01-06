@@ -30,6 +30,46 @@ import ora from 'ora';
 import type { Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
+// Common string literals
+const CLI_STRINGS = {
+  PROGRESS_FORMAT:
+    'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
+  BAR_COMPLETE: '\u2588',
+  BAR_INCOMPLETE: '\u2591',
+  CLI_NAME: 'depsweep',
+  CLI_VERSION: '1.0.0',
+  CLI_DESCRIPTION:
+    'CLI tool that identifies and removes unused npm dependencies',
+  EXAMPLE_TEXT: '\nExample:\n  $ depsweep --verbose',
+} as const;
+
+const FILE_PATTERNS = {
+  PACKAGE_JSON: 'package.json',
+  YARN_LOCK: 'yarn.lock',
+  PNPM_LOCK: 'pnpm-lock.yaml',
+  NODE_MODULES: 'node_modules',
+  CONFIG_REGEX: /\.(config|rc)(\.|\b)/,
+  PACKAGE_NAME_REGEX: /^[@a-zA-Z0-9-_/.]+$/,
+} as const;
+
+const PACKAGE_MANAGERS = {
+  NPM: 'npm',
+  YARN: 'yarn',
+  PNPM: 'pnpm',
+  COMMANDS: {
+    INSTALL: 'install',
+    UNINSTALL: 'uninstall',
+    REMOVE: 'remove',
+  },
+} as const;
+
+const DEPENDENCY_PATTERNS = {
+  TYPES_PREFIX: '@types/',
+  DYNAMIC_IMPORT_BASE: 'import\\s*\\(\\s*[\'"]',
+  DYNAMIC_IMPORT_END: '[\'"]\\s*\\)',
+} as const;
+
+// Replace existing MESSAGES constant
 const MESSAGES = {
   title: 'DepSweep 🧹',
   noPackageJson: 'No package.json found.',
@@ -48,7 +88,9 @@ const MESSAGES = {
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
   analysisComplete: 'Analysis complete',
-};
+  signalCleanup: '\n{0} received. Cleaning up...',
+  unexpected: '\nUnexpected error:',
+} as const;
 
 // Update interface for package.json structure
 interface PackageJson {
@@ -133,7 +175,9 @@ async function getWorkspaceInfo(
 
 // Enhanced package.json finder with improved monorepo support
 async function findClosestPackageJson(startDirectory: string): Promise<string> {
-  const packageJsonPath = await findUp('package.json', { cwd: startDirectory });
+  const packageJsonPath = await findUp(FILE_PATTERNS.PACKAGE_JSON, {
+    cwd: startDirectory,
+  });
   if (!packageJsonPath) {
     console.error(chalk.red(MESSAGES.noPackageJson));
     process.exit(1);
@@ -146,7 +190,10 @@ async function findClosestPackageJson(startDirectory: string): Promise<string> {
     if (parentDirectory === currentDirectory) {
       break;
     }
-    const potentialRootPackageJson = path.join(parentDirectory, 'package.json');
+    const potentialRootPackageJson = path.join(
+      parentDirectory,
+      FILE_PATTERNS.PACKAGE_JSON,
+    );
     try {
       const rootPackageString = await fs.readFile(
         potentialRootPackageJson,
@@ -216,8 +263,8 @@ function isConfigFile(filePath: string): boolean {
   return (
     filename.includes('config') ||
     filename.startsWith('.') ||
-    filename === 'package.json' ||
-    /\.(config|rc)(\.|\b)/.test(filename)
+    filename === FILE_PATTERNS.PACKAGE_JSON ||
+    FILE_PATTERNS.CONFIG_REGEX.test(filename)
   );
 }
 
@@ -265,7 +312,7 @@ async function getSourceFiles(
     cwd: projectDirectory,
     gitignore: true,
     ignore: [
-      'node_modules',
+      FILE_PATTERNS.NODE_MODULES,
       'dist',
       'coverage',
       'build',
@@ -329,7 +376,7 @@ async function isTypePackageUsed(
   context: DependencyContext,
   sourceFiles: string[],
 ): Promise<{ isUsed: boolean; supportedPackage?: string }> {
-  if (!dependency.startsWith('@types/')) {
+  if (!dependency.startsWith(DEPENDENCY_PATTERNS.TYPES_PREFIX)) {
     return { isUsed: false };
   }
 
@@ -515,7 +562,7 @@ async function isDependencyUsedInFile(
 ): Promise<boolean> {
   // For package.json, do a deep scan of all configurations
   if (
-    path.basename(filePath) === 'package.json' &&
+    path.basename(filePath) === FILE_PATTERNS.PACKAGE_JSON &&
     context.configs?.['package.json'] && // Deep scan all of package.json content
     scanForDependency(context.configs['package.json'], dependency)
   ) {
@@ -556,7 +603,7 @@ async function isDependencyUsedInFile(
 
     // Check for dynamic imports in raw content
     const dynamicImportRegex = new RegExp(
-      `import\\s*\\(\\s*['"]${dependency.replaceAll(/[/@-]/g, '[/@-]')}['"]\\s*\\)`,
+      `${DEPENDENCY_PATTERNS.DYNAMIC_IMPORT_BASE}${dependency.replaceAll(/[/@-]/g, '[/@-]')}${DEPENDENCY_PATTERNS.DYNAMIC_IMPORT_END}`,
       'i',
     );
     if (dynamicImportRegex.test(content)) {
@@ -767,20 +814,20 @@ async function processFilesInParallel(
 async function detectPackageManager(projectDirectory: string): Promise<string> {
   if (
     await fs
-      .access(path.join(projectDirectory, 'yarn.lock'))
+      .access(path.join(projectDirectory, FILE_PATTERNS.YARN_LOCK))
       .then(() => true)
       .catch(() => false)
   ) {
-    return 'yarn';
+    return PACKAGE_MANAGERS.YARN;
   } else if (
     await fs
-      .access(path.join(projectDirectory, 'pnpm-lock.yaml'))
+      .access(path.join(projectDirectory, FILE_PATTERNS.PNPM_LOCK))
       .then(() => true)
       .catch(() => false)
   ) {
-    return 'pnpm';
+    return PACKAGE_MANAGERS.PNPM;
   }
-  return 'npm';
+  return PACKAGE_MANAGERS.NPM;
 }
 
 // Add these variables before the main function
@@ -855,7 +902,7 @@ async function measureInstallTime(pkg: string): Promise<number> {
 
 // Add this validation function
 function isValidPackageName(name: string): boolean {
-  return /^[@a-zA-Z0-9-_/.]+$/.test(name);
+  return FILE_PATTERNS.PACKAGE_NAME_REGEX.test(name);
 }
 
 // Recursively compute dir size for accurate disk usage stats
@@ -943,12 +990,10 @@ async function main(): Promise<void> {
 
     // Configure the CLI program
     program
-      .name('depsweep')
+      .name(CLI_STRINGS.CLI_NAME)
       .usage('[options]')
-      .version('1.0.0')
-      .description(
-        'CLI tool that identifies and removes unused npm dependencies',
-      )
+      .version(CLI_STRINGS.CLI_VERSION)
+      .description(CLI_STRINGS.CLI_DESCRIPTION)
       .option('-v, --verbose', 'display detailed usage information')
       .option('-i, --ignore <patterns...>', 'patterns to ignore')
       .option(
@@ -959,7 +1004,7 @@ async function main(): Promise<void> {
       .option('-m, --measure', 'measure saved installation time')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
+      .addHelpText('after', CLI_STRINGS.EXAMPLE_TEXT);
 
     program.exitOverride(() => {
       // Don't throw or exit - just let the help display
@@ -1025,10 +1070,9 @@ async function main(): Promise<void> {
     let progressBar: cliProgress.SingleBar | null = null;
     if (options.progress) {
       progressBar = new cliProgress.SingleBar({
-        format:
-          'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
-        barCompleteChar: '\u2588',
-        barIncompleteChar: '\u2591',
+        format: CLI_STRINGS.PROGRESS_FORMAT,
+        barCompleteChar: CLI_STRINGS.BAR_COMPLETE,
+        barIncompleteChar: CLI_STRINGS.BAR_INCOMPLETE,
       });
       activeProgressBar = progressBar;
       progressBar.start(totalFiles, 0);
@@ -1061,7 +1105,7 @@ async function main(): Promise<void> {
     if (progressBar) {
       progressBar.stop();
     }
-    console.log(chalk.green('✔'), 'Analysis complete');
+    console.log(chalk.green('✔'), MESSAGES.analysisComplete);
 
     // Filter out type packages that correspond to installed packages
     const installedPackages = dependencies.filter(
@@ -1218,15 +1262,15 @@ async function main(): Promise<void> {
         // Build uninstall command
         let uninstallCommand = '';
         switch (packageManager) {
-          case 'npm': {
+          case PACKAGE_MANAGERS.NPM: {
             uninstallCommand = `npm uninstall ${unusedDependencies.join(' ')}`;
             break;
           }
-          case 'yarn': {
+          case PACKAGE_MANAGERS.YARN: {
             uninstallCommand = `yarn remove ${unusedDependencies.join(' ')}`;
             break;
           }
-          case 'pnpm': {
+          case PACKAGE_MANAGERS.PNPM: {
             uninstallCommand = `pnpm remove ${unusedDependencies.join(' ')}`;
             break;
           }
@@ -1260,7 +1304,7 @@ async function main(): Promise<void> {
     }
   } catch (error) {
     cleanup();
-    console.error(chalk.red('\nFatal error:'), error);
+    console.error(chalk.red(MESSAGES.fatalError), error);
     process.exit(1);
   }
 }
@@ -1270,7 +1314,7 @@ async function init(): Promise<void> {
   try {
     // Handle exit signals at the top level
     const exitHandler = (signal: string): void => {
-      console.log(`\n${signal} received. Cleaning up...`);
+      console.log(MESSAGES.signalCleanup.replace('{0}', signal));
       cleanup();
       // Exit without error since this is an intentional exit
       process.exit(0);
@@ -1287,13 +1331,13 @@ async function init(): Promise<void> {
     await main();
   } catch (error) {
     cleanup();
-    console.error(chalk.red('\nUnexpected error:'), error);
+    console.error(chalk.red(MESSAGES.unexpected), error);
     process.exit(1);
   }
 }
 
 init().catch((error) => {
-  console.error(chalk.red('\nFatal error:'), error);
+  console.error(chalk.red(MESSAGES.fatalError), error);
   process.exit(1);
 });
 
