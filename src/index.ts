@@ -31,6 +31,7 @@ import type { Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
 const MESSAGES = {
+  title: 'DepSweep 🧹',
   noPackageJson: 'No package.json found.',
   monorepoDetected: '\nMonorepo detected. Using root package.json.',
   monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
@@ -38,7 +39,6 @@ const MESSAGES = {
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:\n',
-  dryRunNoChanges: '\nDry run - no changes made',
   noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
@@ -76,8 +76,8 @@ const traverseFunction = ((traverse as any).default || traverse) as (
   options: any,
 ) => void;
 
-// Add essential packages that should never be removed
-const ESSENTIAL_PACKAGES = new Set([
+// Add protected packages that should never be removed
+const PROTECTED_PACKAGES = new Set([
   'typescript',
   '@types/node',
   'tslib',
@@ -513,11 +513,6 @@ async function isDependencyUsedInFile(
   filePath: string,
   context: DependencyContext,
 ): Promise<boolean> {
-  // Check essential packages first
-  if (ESSENTIAL_PACKAGES.has(dependency)) {
-    return true;
-  }
-
   // For package.json, do a deep scan of all configurations
   if (
     path.basename(filePath) === 'package.json' &&
@@ -956,7 +951,11 @@ async function main(): Promise<void> {
       )
       .option('-v, --verbose', 'display detailed usage information')
       .option('-i, --ignore <patterns...>', 'patterns to ignore')
-      .option('--safe', 'prevent removing essential packages')
+      .option('-a, --aggressive', 'allow removal of protected packages')
+      .option(
+        '-s, --safe <deps...>',
+        'additional dependencies to protect from removal',
+      )
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
       .option('-m, --measure', 'measure saved installation time')
@@ -986,7 +985,9 @@ async function main(): Promise<void> {
     const projectDirectory = path.dirname(packageJsonPath);
     const context = await getPackageContext(packageJsonPath);
 
-    console.log(chalk.bold('\ndepsweep Deps Analysis'));
+    console.log(chalk.cyan(MESSAGES.title));
+
+    console.log(chalk.bold('\nDependency Analysis'));
     console.log(
       `Package.json found at: ${chalk.green(
         path.relative(process.cwd(), packageJsonPath),
@@ -1021,15 +1022,15 @@ async function main(): Promise<void> {
     let processedDependencies = 0;
     const totalFiles = dependencies.length * sourceFiles.length;
 
-    const progressBar = new cliProgress.SingleBar({
-      format:
-        'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
-      barCompleteChar: '\u2588',
-      barIncompleteChar: '\u2591',
-    });
-    activeProgressBar = progressBar;
-
-    if (!program.opts().noProgress) {
+    let progressBar: cliProgress.SingleBar | null = null;
+    if (options.progress) {
+      progressBar = new cliProgress.SingleBar({
+        format:
+          'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
+        barCompleteChar: '\u2588',
+        barIncompleteChar: '\u2591',
+      });
+      activeProgressBar = progressBar;
       progressBar.start(totalFiles, 0);
     }
 
@@ -1040,12 +1041,16 @@ async function main(): Promise<void> {
         dep,
         context,
         (processed) => {
-          progressBar.update(offset + processed);
+          if (progressBar) {
+            progressBar.update(offset + processed);
+          }
         },
       );
 
       processedDependencies++;
-      progressBar.update(processedDependencies * sourceFiles.length);
+      if (progressBar) {
+        progressBar.update(processedDependencies * sourceFiles.length);
+      }
 
       if (usageFiles.length === 0) {
         unusedDependencies.push(dep);
@@ -1053,15 +1058,10 @@ async function main(): Promise<void> {
       dependencyUsage[dep] = usageFiles;
     }
 
-    progressBar.stop();
-    console.log(chalk.green('✔'), 'Analysis complete');
-
-    // Filter out essential packages if in safe mode
-    if (program.opts().safe) {
-      unusedDependencies = unusedDependencies.filter(
-        (dep) => !ESSENTIAL_PACKAGES.has(dep),
-      );
+    if (progressBar) {
+      progressBar.stop();
     }
+    console.log(chalk.green('✔'), 'Analysis complete');
 
     // Filter out type packages that correspond to installed packages
     const installedPackages = dependencies.filter(
@@ -1085,38 +1085,38 @@ async function main(): Promise<void> {
       .filter((result) => !result.isUsed)
       .map((result) => result.dep);
 
-    unusedDependencies.sort((a, b) =>
-      a
-        .replace(/^@/, '')
-        .localeCompare(b.replace(/^@/, ''), 'en', { sensitivity: 'base' }),
-    );
+    // By default, run in safe mode (filter out protected packages)
+    // Only include protected packages if aggressive flag is set
+    let safeUnused: string[] = [];
 
-    if (options.verbose) {
-      const table = new CliTable({
-        head: ['Dependency', 'Usage'],
-        wordWrap: true,
-        colWidths: [30, 70],
-      });
+    // Create a combined set of protected packages
+    const protectedPackages = new Set([
+      ...PROTECTED_PACKAGES,
+      ...(options.safe || []),
+    ]);
 
-      for (const dep of dependencies) {
-        const usage = dependencyUsage[dep];
-        const supportInfo = typePackageSupport[dep]
-          ? ` (supports "${typePackageSupport[dep]}")`
-          : '';
-        table.push([
-          dep,
-          usage.length > 0
-            ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
-            : chalk.yellow(`Not used${supportInfo}`),
-        ]);
-      }
+    // In aggressive mode, only use user-specified safe deps
+    const safeSet = options.aggressive
+      ? new Set(options.safe || [])
+      : protectedPackages;
 
-      console.log();
-      console.log(table.toString());
-    } else if (unusedDependencies.length > 0) {
+    if (safeSet.size > 0) {
+      safeUnused = unusedDependencies.filter((dep) => safeSet.has(dep));
+      unusedDependencies = unusedDependencies.filter(
+        (dep) => !safeSet.has(dep),
+      );
+    }
+
+    if (unusedDependencies.length > 0 || safeUnused.length > 0) {
       console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
+      }
+      for (const dep of safeUnused) {
+        const isSafeListed = options.safe?.includes(dep);
+        console.log(
+          chalk.blue(`- ${dep} [${isSafeListed ? 'safe' : 'protected'}]`),
+        );
       }
 
       let totalSize = 0;
@@ -1160,13 +1160,15 @@ async function main(): Promise<void> {
             time = await measureInstallTime(dep);
             totalInstallTime += time;
             installResults.push({ dep, time });
-            measureSpinner.text = `${MESSAGES.measuringInstallTime} (${i + 1}/${totalPackages})`;
+            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(`[${i + 1}/${totalPackages}]`)}`;
           } catch {
             // Ignore errors and continue
           }
         }
 
-        measureSpinner.succeed(MESSAGES.measureComplete);
+        measureSpinner.succeed(
+          `${MESSAGES.measureComplete} ${chalk.blue(`[${totalPackages}/${totalPackages}]`)}`,
+        );
         installResults.forEach((entry) =>
           console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`),
         );
@@ -1175,8 +1177,32 @@ async function main(): Promise<void> {
         );
       }
 
-      if (program.opts().dryRun) {
-        console.log(chalk.blue(MESSAGES.dryRunNoChanges));
+      if (options.verbose) {
+        const table = new CliTable({
+          head: ['Dependency', 'Usage'],
+          wordWrap: true,
+          colWidths: [30, 70],
+        });
+
+        for (const dep of dependencies) {
+          const usage = dependencyUsage[dep];
+          const supportInfo = typePackageSupport[dep]
+            ? ` (supports "${typePackageSupport[dep]}")`
+            : '';
+          table.push([
+            dep,
+            usage.length > 0
+              ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
+              : chalk.yellow(`Not used${supportInfo}`),
+          ]);
+        }
+
+        console.log();
+        console.log(table.toString());
+      }
+
+      if (options.dryRun) {
+        console.log(chalk.blue(MESSAGES.noChangesMade));
         return;
       }
 
