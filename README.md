@@ -17,13 +17,14 @@ TypeScript projects with confidence.
 - 🚀 **Modern JS/TS Support**: Supports the latest JavaScript and TypeScript
   features.
 - 📦 **Package Manager Compatibility**: Works with npm, yarn, and pnpm.
-- 🛡️ **Safe Mode**: Prevents accidental removal of essential packages.
+- 🛡️ **Safe Mode**: Prevents accidental removal of specified packages.
 - 🏗️ **Monorepo Support**: Seamlessly handles projects within monorepos.
 - ⚡ **Efficient Processing**: Utilizes parallel processing for faster analysis.
 - 🧩 **Config File Scanning**: Detects dependencies used in configuration files.
-- 🔧 **Customizable Ignoring**: Allows specifying patterns to exclude from
+- 🔧 **Customizable Ignoring**: Allows specifying directory patterns to exclude from
   scanning.
 - 🧠 **Memory Management**: Efficiently manages memory usage during analysis.
+- 🏆 **Impact Reporting**: See the impact of removing unused dependencies.
 
 ## Installation
 
@@ -67,7 +68,8 @@ depsweep
 Options:
   -v, --verbose          Display detailed usage information
   -i, --ignore <paths>   Patterns to ignore during scanning
-  --safe                 Enable safe mode to protect essential packages
+  --safe                 Enable safe mode to protect specified packages
+  -a, --aggressive       Allow removal of protected packages
   --dry-run              Show what would be removed without making changes
   --no-progress          Disable the progress bar
   -h, --help             Display help information
@@ -89,6 +91,10 @@ depsweep -i "test/**" "scripts/**"
 depsweep --dry-run
 ```
 
+## Protected Packages
+By default, a list of protected packages like `typescript` are protected to prevent accidental removal. Use
+the `-a, --aggressive` flag to override this protection. Combine with the `-s, --safe` flag to enable removal for only some protected packages.
+
 ## How It Works
 
 `depsweep` performs a comprehensive analysis of your project to identify and remove
@@ -106,13 +112,10 @@ unused dependencies:
 4. **Monorepo Awareness**: Detects monorepo structures and adjusts analysis
    accordingly. This ensures that dependencies used across multiple packages in
    a monorepo are correctly identified and not mistakenly marked as unused.
-5. **Essential Package Protection**: Prevents removal of critical packages when
-   in safe mode. This feature ensures that essential development tools and
-   libraries are not accidentally removed.
-6. **Efficient Processing**: Leverages parallel processing for faster execution.
+5. **Efficient Processing**: Leverages parallel processing for faster execution.
    By processing files in parallel, `depsweep` can analyze large codebases more
    quickly and efficiently.
-7. **Memory Management**: Monitors and manages memory usage during analysis to
+6. **Memory Management**: Monitors and manages memory usage during analysis to
    prevent crashes. This ensures that the tool can handle large projects without
    running out of memory.
 
@@ -124,7 +127,6 @@ unused dependencies:
 - ✅ Configuration Files
 - ✅ Workspace Packages
 - ✅ Binary File Detection
-- ✅ Essential Package Protection
 - ✅ Monorepo Support
 
 ## Contributing
