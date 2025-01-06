@@ -92,7 +92,7 @@ depsweep --dry-run
 
 ## Protected Packages
 
-A [list of protected packages](src/index.ts#L34) are ignored by default to
+A [list of protected packages](src/index.ts#L37) are ignored by default to
 prevent accidental removal. Use the `-a, --aggressive` flag to override this
 protection. Combine with the `-s, --safe` flag to enable removal for only some
 protected packages.

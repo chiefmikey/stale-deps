@@ -30,7 +30,10 @@ import ora from 'ora';
 import type { Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
-// Add protected packages that should never be removed
+/*
+ * Essential packages that should never be removed automatically,
+ * unless the `-a, --aggressive` flag is used.
+ ******************************************************************/
 const PROTECTED_PACKAGES = new Set([
   'typescript',
   '@types/node',
@@ -38,6 +41,7 @@ const PROTECTED_PACKAGES = new Set([
   'prettier',
   'eslint',
 ]);
+/******************************************************************/
 
 // Common string literals
 const CLI_STRINGS = {
