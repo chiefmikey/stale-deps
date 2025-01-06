@@ -1233,8 +1233,13 @@ async function main(): Promise<void> {
           const supportInfo = typePackageSupport[dep]
             ? ` (supports "${typePackageSupport[dep]}")`
             : '';
+          const label = safeSet.has(dep)
+            ? options.safe?.includes(dep)
+              ? '[safe]'
+              : '[protected]'
+            : '';
           table.push([
-            dep,
+            `${dep} ${chalk.blue(label)}`,
             usage.length > 0
               ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
               : chalk.yellow(`Not used${supportInfo}`),
