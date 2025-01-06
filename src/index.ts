@@ -93,7 +93,7 @@ const MESSAGES = {
   dependenciesRemoved: 'Dependencies:',
   diskSpace: 'Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
-  measuringInstallTime: 'Measuring install time...',
+  measuringInstallTime: 'Measuring installation...',
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
   analysisComplete: 'Analysis complete',
