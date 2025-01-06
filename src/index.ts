@@ -31,6 +31,7 @@ import type { Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
 const MESSAGES = {
+  title: 'DepSweep 🧹',
   noPackageJson: 'No package.json found.',
   monorepoDetected: '\nMonorepo detected. Using root package.json.',
   monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
@@ -984,7 +985,9 @@ async function main(): Promise<void> {
     const projectDirectory = path.dirname(packageJsonPath);
     const context = await getPackageContext(packageJsonPath);
 
-    console.log(chalk.bold('\ndepsweep Deps Analysis'));
+    console.log(chalk.cyan(MESSAGES.title));
+
+    console.log(chalk.bold('\nDependency Analysis'));
     console.log(
       `Package.json found at: ${chalk.green(
         path.relative(process.cwd(), packageJsonPath),
