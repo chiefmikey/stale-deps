@@ -965,7 +965,7 @@ function safeExecSync(
     execSync(shellEscape(command), {
       stdio: options.stdio || 'inherit',
       cwd: options.cwd,
-      timeout: options.timeout || 300_000,
+      timeout: options.timeout ?? 300_000,
       encoding: 'utf8',
     });
   } catch (error) {
@@ -1218,7 +1218,8 @@ async function main(): Promise<void> {
             time = await measureInstallTime(dep);
             totalInstallTime += time;
             installResults.push({ dep, time });
-            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(`[${index + 1}/${totalPackages}]`)}`;
+            const progress = `${index + 1}/${totalPackages}`;
+            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(progress)}`;
           } catch {
             // Ignore errors and continue
           }
