@@ -81,7 +81,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git push -f origin HEAD:${{ github.event.inputs.branch }}
+          git push origin HEAD:${{ github.event.inputs.branch }}
           git push --tags
 
       - name: Create GitHub Release
@@ -118,6 +118,6 @@ jobs:
 
           # Reset local changes
           git reset --hard HEAD^
-          git push --force || true
+          git push origin HEAD:${{ github.event.inputs.branch }} || true
 
           echo "::error::Rollback complete. Please check the repository state."
