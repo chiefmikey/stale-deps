@@ -2,12 +2,12 @@
 /* eslint-disable unicorn/prefer-json-parse-buffer */
 
 import { execSync, spawn } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import v8 from 'node:v8';
-import { readdirSync, statSync } from 'node:fs';
 
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
@@ -30,6 +30,15 @@ import ora from 'ora';
 import type { Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
+// Add protected packages that should never be removed
+const PROTECTED_PACKAGES = new Set([
+  'typescript',
+  '@types/node',
+  'tslib',
+  'prettier',
+  'eslint',
+]);
+
 // Common string literals
 const CLI_STRINGS = {
   PROGRESS_FORMAT:
@@ -49,7 +58,7 @@ const FILE_PATTERNS = {
   PNPM_LOCK: 'pnpm-lock.yaml',
   NODE_MODULES: 'node_modules',
   CONFIG_REGEX: /\.(config|rc)(\.|\b)/,
-  PACKAGE_NAME_REGEX: /^[@a-zA-Z0-9-_/.]+$/,
+  PACKAGE_NAME_REGEX: /^[\w./@-]+$/,
 } as const;
 
 const PACKAGE_MANAGERS = {
@@ -65,8 +74,8 @@ const PACKAGE_MANAGERS = {
 
 const DEPENDENCY_PATTERNS = {
   TYPES_PREFIX: '@types/',
-  DYNAMIC_IMPORT_BASE: 'import\\s*\\(\\s*[\'"]',
-  DYNAMIC_IMPORT_END: '[\'"]\\s*\\)',
+  DYNAMIC_IMPORT_BASE: String.raw`import\s*\(\s*['"]`,
+  DYNAMIC_IMPORT_END: String.raw`['"]\s*\)`,
 } as const;
 
 // Replace existing MESSAGES constant
@@ -117,15 +126,6 @@ const traverseFunction = ((traverse as any).default || traverse) as (
   ast: any,
   options: any,
 ) => void;
-
-// Add protected packages that should never be removed
-const PROTECTED_PACKAGES = new Set([
-  'typescript',
-  '@types/node',
-  'tslib',
-  'prettier',
-  'eslint',
-]);
 
 // Add raw content patterns
 const RAW_CONTENT_PATTERNS = new Map([
@@ -879,17 +879,17 @@ async function getPackageSizeFromNpm(
 }
 
 // Measure install time by running a subprocess
-async function measureInstallTime(pkg: string): Promise<number> {
-  if (!isValidPackageName(pkg)) {
-    throw new Error(`Invalid package name: ${pkg}`);
+async function measureInstallTime(package_: string): Promise<number> {
+  if (!isValidPackageName(package_)) {
+    throw new Error(`Invalid package name: ${package_}`);
   }
 
   const start = Date.now();
   await new Promise<void>((resolve, reject) => {
-    const child = spawn('npm', ['install', pkg], {
+    const child = spawn('npm', ['install', package_], {
       stdio: 'ignore',
       cwd: process.cwd(),
-      timeout: 300000,
+      timeout: 300_000,
     });
     child.on('error', reject);
     child.on('close', (code) => {
@@ -911,11 +911,9 @@ function getDirectorySize(dir: string): number {
   const files = readdirSync(dir, { withFileTypes: true });
   for (const f of files) {
     const fullPath = path.join(dir, f.name);
-    if (f.isDirectory()) {
-      total += getDirectorySize(fullPath);
-    } else {
-      total += statSync(fullPath).size;
-    }
+    total += f.isDirectory()
+      ? getDirectorySize(fullPath)
+      : statSync(fullPath).size;
   }
   return total;
 }
@@ -928,9 +926,8 @@ function formatSize(bytes: number): string {
     return `${(bytes / 1e6).toFixed(2)} MB`;
   } else if (bytes >= 1e3) {
     return `${(bytes / 1e3).toFixed(2)} KB`;
-  } else {
-    return `${bytes} Bytes`;
   }
+  return `${bytes} Bytes`;
 }
 
 // Add this validation at the top with other constants
@@ -949,14 +946,18 @@ function safeExecSync(
     throw new Error('Invalid command array');
   }
 
-  const [packageManager, ...args] = command;
+  const [packageManager, ...arguments_] = command;
 
   if (!VALID_PACKAGE_MANAGERS.has(packageManager)) {
     throw new Error(`Invalid package manager: ${packageManager}`);
   }
 
   // Validate all arguments
-  if (!args.every((arg) => typeof arg === 'string' && arg.length > 0)) {
+  if (
+    !arguments_.every(
+      (argument) => typeof argument === 'string' && argument.length > 0,
+    )
+  ) {
     throw new Error('Invalid command arguments');
   }
 
@@ -964,7 +965,7 @@ function safeExecSync(
     execSync(shellEscape(command), {
       stdio: options.stdio || 'inherit',
       cwd: options.cwd,
-      timeout: options.timeout || 300000,
+      timeout: options.timeout || 300_000,
       encoding: 'utf8',
     });
   } catch (error) {
@@ -1179,7 +1180,10 @@ async function main(): Promise<void> {
         return size ?? 0;
       });
       const sizeResults = await Promise.all(sizePromises);
-      totalSize = sizeResults.reduce((acc, val) => acc + val, 0);
+      totalSize = sizeResults.reduce(
+        (accumulator, value) => accumulator + value,
+        0,
+      );
 
       // Additional Impact Reporting
       const removedCount = unusedDependencies.length;
@@ -1205,16 +1209,16 @@ async function main(): Promise<void> {
 
         let totalInstallTime = 0;
         const totalPackages = unusedDependencies.length;
-        const installResults: Array<{ dep: string; time: number }> = [];
+        const installResults: { dep: string; time: number }[] = [];
 
-        for (let i = 0; i < totalPackages; i++) {
-          const dep = unusedDependencies[i];
+        for (let index = 0; index < totalPackages; index++) {
+          const dep = unusedDependencies[index];
           let time = 0;
           try {
             time = await measureInstallTime(dep);
             totalInstallTime += time;
             installResults.push({ dep, time });
-            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(`[${i + 1}/${totalPackages}]`)}`;
+            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(`[${index + 1}/${totalPackages}]`)}`;
           } catch {
             // Ignore errors and continue
           }
@@ -1223,9 +1227,8 @@ async function main(): Promise<void> {
         measureSpinner.succeed(
           `${MESSAGES.measureComplete} ${chalk.blue(`[${totalPackages}/${totalPackages}]`)}`,
         );
-        installResults.forEach((entry) =>
-          console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`),
-        );
+        for (const entry of installResults)
+          console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`);
         console.log(
           `${MESSAGES.installTime} ${chalk.bold(`~${totalInstallTime.toFixed(2)}s`)}`,
         );
@@ -1301,7 +1304,7 @@ async function main(): Promise<void> {
             safeExecSync([packageManager, 'uninstall', ...unusedDependencies], {
               stdio: 'inherit',
               cwd: projectDirectory,
-              timeout: 300000,
+              timeout: 300_000,
             });
           } catch (error) {
             console.error(chalk.red('Failed to uninstall packages:'), error);
@@ -1309,7 +1312,7 @@ async function main(): Promise<void> {
           }
         }
       } else {
-        console.log(chalk.blue(`${MESSAGES.noChangesMade}`));
+        console.log(chalk.blue(MESSAGES.noChangesMade));
       }
       rl.close();
       activeReadline = null;
