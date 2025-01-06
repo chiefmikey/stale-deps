@@ -34,6 +34,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch }}
           fetch-depth: 0
+          token: ${{ secrets.ADMIN_PAT }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -49,7 +50,7 @@ jobs:
         run: |
           git config --local user.email "wolfemikl@gmail.com"
           git config --local user.name "Mikl Wolfe"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git remote set-url origin https://x-access-token:${{ secrets.ADMIN_PAT }}@github.com/${{ github.repository }}
 
       - name: Bump version
         id: bump_version
@@ -73,7 +74,7 @@ jobs:
       - name: Push Git Changes
         if: success()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ADMIN_PAT }}
         run: |
           git push origin HEAD:${{ github.event.inputs.branch }}
           git push --tags
@@ -81,7 +82,7 @@ jobs:
       - name: Create GitHub Release
         if: success()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ADMIN_PAT }}
         run: |
           gh release create v${{ steps.bump_version.outputs.new_version }} \
             --title "v${{ steps.bump_version.outputs.new_version }}" \
@@ -102,6 +103,8 @@ jobs:
 
       - name: Rollback on failure
         if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.ADMIN_PAT }}
         run: |
           echo "::error::Deployment failed, attempting rollback..."
 
