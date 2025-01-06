@@ -1233,11 +1233,10 @@ async function main(): Promise<void> {
           const supportInfo = typePackageSupport[dep]
             ? ` (supports "${typePackageSupport[dep]}")`
             : '';
-          const label = safeSet.has(dep)
-            ? options.safe?.includes(dep)
-              ? '[safe]'
-              : '[protected]'
-            : '';
+          let label = '';
+          if (safeSet.has(dep)) {
+            label = options.safe?.includes(dep) ? '[safe]' : '[protected]';
+          }
           table.push([
             `${dep} ${chalk.blue(label)}`,
             usage.length > 0
