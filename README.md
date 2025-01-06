@@ -63,7 +63,7 @@ pnpm add -g depsweep
 
 ### Options
 
-```bash
+```txt
   -v, --verbose          Display detailed usage information
   -i, --ignore <paths>   Patterns to ignore during scanning
   -s, --safe <deps>      Enable safe mode to protect specified packages
