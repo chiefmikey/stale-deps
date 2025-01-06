@@ -68,8 +68,9 @@ depsweep
 Options:
   -v, --verbose          Display detailed usage information
   -i, --ignore <paths>   Patterns to ignore during scanning
-  --safe                 Enable safe mode to protect specified packages
+  -s, --safe             Enable safe mode to protect specified packages
   -a, --aggressive       Allow removal of protected packages
+  -m, --measure          Measure unused dependency install time
   --dry-run              Show what would be removed without making changes
   --no-progress          Disable the progress bar
   -h, --help             Display help information
@@ -81,8 +82,8 @@ Options:
 # Run with verbose output
 depsweep --verbose
 
-# Run in safe mode
-depsweep --safe
+# Specify packages to protect
+depsweep --safe react react-dom
 
 # Ignore specific directories or files
 depsweep -i "test/**" "scripts/**"
