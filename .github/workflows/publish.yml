@@ -65,13 +65,13 @@ jobs:
         run: npm run build
 
       - name: Commit version changes
-        if: steps.npm_publish.outcome == 'success'
+        if: success()
         run: |
           git add package.json package-lock.json
           git commit -m "v${{ steps.bump_version.outputs.new_version }}"
 
       - name: Push Git Changes
-        if: steps.npm_publish.outcome == 'success'
+        if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -79,7 +79,7 @@ jobs:
           git push --tags
 
       - name: Create GitHub Release
-        if: steps.npm_publish.outcome == 'success'
+        if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
