@@ -76,8 +76,8 @@ const traverseFunction = ((traverse as any).default || traverse) as (
   options: any,
 ) => void;
 
-// Add essential packages that should never be removed
-const ESSENTIAL_PACKAGES = new Set([
+// Add protected packages that should never be removed
+const PROTECTED_PACKAGES = new Set([
   'typescript',
   '@types/node',
   'tslib',
@@ -951,7 +951,7 @@ async function main(): Promise<void> {
       )
       .option('-v, --verbose', 'display detailed usage information')
       .option('-i, --ignore <patterns...>', 'patterns to ignore')
-      .option('-a, --aggressive', 'allow removal of essential packages')
+      .option('-a, --aggressive', 'allow removal of protected packages')
       .option(
         '-s, --safe <deps...>',
         'additional dependencies to protect from removal',
@@ -1085,13 +1085,13 @@ async function main(): Promise<void> {
       .filter((result) => !result.isUsed)
       .map((result) => result.dep);
 
-    // By default, run in safe mode (filter out essential packages)
-    // Only include essential packages if aggressive flag is set
+    // By default, run in safe mode (filter out protected packages)
+    // Only include protected packages if aggressive flag is set
     let safeUnused: string[] = [];
 
     // Create a combined set of protected packages
     const protectedPackages = new Set([
-      ...ESSENTIAL_PACKAGES,
+      ...PROTECTED_PACKAGES,
       ...(options.safe || []),
     ]);
 
