@@ -951,14 +951,14 @@ async function main(): Promise<void> {
       )
       .option('-v, --verbose', 'display detailed usage information')
       .option('-i, --ignore <patterns...>', 'patterns to ignore')
-      .option('-a, --aggressive', 'allow removal of protected packages')
       .option(
         '-s, --safe <deps...>',
         'additional dependencies to protect from removal',
       )
+      .option('-a, --aggressive', 'allow removal of protected packages')
+      .option('-m, --measure', 'measure saved installation time')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .option('-m, --measure', 'measure saved installation time')
       .addHelpText('after', '\nExample:\n  $ depsweep --verbose');
 
     program.exitOverride(() => {
