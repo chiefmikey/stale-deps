@@ -33,7 +33,7 @@ import shellEscape from 'shell-escape';
 // Common string literals
 const CLI_STRINGS = {
   PROGRESS_FORMAT:
-    'Analyzing dependencies |{bar}| {percentage}% || {value}/{total} Files',
+    'Analyzing dependencies |{bar}| {percentage}% | {value}/{total} Files',
   BAR_COMPLETE: '\u2588',
   BAR_INCOMPLETE: '\u2591',
   CLI_NAME: 'depsweep',
@@ -78,7 +78,7 @@ const MESSAGES = {
   analyzingDependencies: 'Analyzing dependencies...',
   fatalError: '\nFatal error:',
   noUnusedDependencies: 'No unused dependencies found.',
-  unusedFound: 'Unused dependencies found:\n',
+  unusedFound: 'Unused dependencies found:',
   noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
@@ -1031,12 +1031,11 @@ async function main(): Promise<void> {
     const context = await getPackageContext(packageJsonPath);
 
     console.log(chalk.cyan(MESSAGES.title));
-
-    console.log(chalk.bold('\nDependency Analysis'));
+    console.log(chalk.bold('Dependency Analysis\n'));
     console.log(
       `Package.json found at: ${chalk.green(
         path.relative(process.cwd(), packageJsonPath),
-      )}\n`,
+      )}`,
     );
 
     process.on('uncaughtException', (error: Error): void => {
@@ -1105,7 +1104,7 @@ async function main(): Promise<void> {
     if (progressBar) {
       progressBar.stop();
     }
-    console.log(chalk.green('✔'), MESSAGES.analysisComplete);
+    console.log(chalk.green('✔'), MESSAGES.analysisComplete, '\n');
 
     // Filter out type packages that correspond to installed packages
     const installedPackages = dependencies.filter(
@@ -1151,7 +1150,18 @@ async function main(): Promise<void> {
       );
     }
 
-    if (unusedDependencies.length > 0 || safeUnused.length > 0) {
+    if (unusedDependencies.length === 0 && safeUnused.length === 0) {
+      console.log(chalk.green(MESSAGES.noUnusedDependencies));
+    } else if (unusedDependencies.length === 0 && safeUnused.length > 0) {
+      console.log(chalk.bold(MESSAGES.unusedFound));
+      for (const dep of safeUnused) {
+        const isSafeListed = options.safe?.includes(dep);
+        console.log(
+          chalk.blue(`- ${dep} [${isSafeListed ? 'safe' : 'protected'}]`),
+        );
+      }
+      console.log(chalk.blue(MESSAGES.noChangesMade));
+    } else {
       console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
         console.log(chalk.yellow(`- ${dep}`));
@@ -1303,8 +1313,6 @@ async function main(): Promise<void> {
       }
       rl.close();
       activeReadline = null;
-    } else {
-      console.log(chalk.green(MESSAGES.noUnusedDependencies));
     }
   } catch (error) {
     cleanup();
