@@ -926,7 +926,9 @@ function getDirectorySize(dir: string): number {
 
 // Add a helper function to format bytes into human-readable strings
 function formatSize(bytes: number): string {
-  if (bytes >= 1e9) {
+  if (bytes >= 1e12) {
+    return `${(bytes / 1e12).toFixed(2)} TB`;
+  } else if (bytes >= 1e9) {
     return `${(bytes / 1e9).toFixed(2)} GB`;
   } else if (bytes >= 1e6) {
     return `${(bytes / 1e6).toFixed(2)} MB`;
@@ -1047,6 +1049,63 @@ async function measurePackageInstallation(
   return metrics;
 }
 
+async function getDownloadStatsFromNpm(
+  packageName: string,
+): Promise<number | null> {
+  try {
+    const response = await fetch(
+      `https://api.npmjs.org/downloads/point/last-month/${packageName}`,
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    const downloadData = data as { downloads: number };
+    return downloadData.downloads || null;
+  } catch {
+    return null;
+  }
+}
+
+function formatTime(seconds: number): string {
+  if (seconds >= 86_400) {
+    return `${(seconds / 86_400).toFixed(2)} Days`;
+  } else if (seconds >= 3600) {
+    return `${(seconds / 3600).toFixed(2)} Hours`;
+  } else if (seconds >= 60) {
+    return `${(seconds / 60).toFixed(2)} Minutes`;
+  }
+  return `${seconds.toFixed(2)}s`;
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString();
+}
+
+async function getParentPackageDownloads(packageJsonPath: string): Promise<{
+  name: string;
+  downloads: number;
+} | null> {
+  try {
+    const packageJsonString =
+      (await fs.readFile(packageJsonPath, 'utf8')) || '{}';
+    const packageJson = JSON.parse(packageJsonString);
+    const { name } = packageJson;
+    if (!name) return null;
+
+    const downloads = await getDownloadStatsFromNpm(name);
+    if (!downloads) {
+      console.log(
+        chalk.yellow(`\nUnable to find download stats for '${name}'`),
+      );
+      return null;
+    }
+    return { name, downloads };
+  } catch {
+    return null;
+  }
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -1079,6 +1138,10 @@ async function main(): Promise<void> {
       .option('-m, --measure', 'measure saved installation time')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
+      .option(
+        '--extended-impact',
+        'run measure plus usage stats from npm for extended impact analysis',
+      )
       .addHelpText('after', CLI_STRINGS.EXAMPLE_TEXT);
 
     program.exitOverride(() => {
@@ -1273,7 +1336,16 @@ async function main(): Promise<void> {
         `${MESSAGES.carbonFootprint} ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
       );
 
-      if (options.measure) {
+      let totalInstallTime = 0;
+      let totalDiskSpace = 0;
+      const installResults: {
+        dep: string;
+        time: number;
+        space: number;
+        errors?: string[];
+      }[] = [];
+
+      if (options.measure || options.extendedImpact) {
         console.log('');
         const measureSpinner = ora({
           text: MESSAGES.measuringInstallTime,
@@ -1281,16 +1353,8 @@ async function main(): Promise<void> {
         }).start();
         activeSpinner = measureSpinner;
 
-        let totalInstallTime = 0;
-        let totalDiskSpace = 0;
         const totalPackages = unusedDependencies.length;
-        const installResults: {
-          dep: string;
-          time: number;
-          space: number;
-          errors?: string[];
-        }[] = [];
-
+        // ...existing code measuring each dependency...
         for (let index = 0; index < totalPackages; index++) {
           const dep = unusedDependencies[index];
           try {
@@ -1347,6 +1411,38 @@ async function main(): Promise<void> {
         console.log(
           `${MESSAGES.diskSpace} ${chalk.bold(formatSize(totalDiskSpace))}`,
         );
+      }
+
+      if (options.extendedImpact) {
+        console.log('');
+        const extendedSpinner = ora({
+          text: 'Collecting extended impact...',
+          spinner: 'dots',
+        }).start();
+        activeSpinner = extendedSpinner;
+
+        const parentInfo = await getParentPackageDownloads(packageJsonPath);
+        if (parentInfo) {
+          const monthlyDiskImpact = totalDiskSpace * parentInfo.downloads;
+          const monthlyTimeImpact = totalInstallTime * parentInfo.downloads;
+
+          console.log('\nExtended Impact:');
+          console.log(
+            `  ${chalk.yellow(parentInfo.name)} monthly downloads: ${chalk.bold(formatNumber(parentInfo.downloads))}`,
+          );
+          console.log(
+            `  Potential monthly data transfer for unused deps: ${chalk.bold(formatSize(monthlyDiskImpact))}`,
+          );
+          console.log(
+            `  Potential monthly install time for unused deps: ${chalk.bold(formatTime(monthlyTimeImpact))}`,
+          );
+        } else {
+          console.log(
+            chalk.yellow('\nNo usage data found for the parent package.'),
+          );
+        }
+
+        extendedSpinner.succeed('Extended impact data collected');
       }
 
       if (options.verbose) {
