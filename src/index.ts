@@ -4,6 +4,8 @@
 import { execSync, spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
@@ -977,6 +979,74 @@ function safeExecSync(
   }
 }
 
+interface InstallMetrics {
+  installTime: number;
+  diskSpace: number;
+  errors?: string[];
+}
+
+async function createTemporaryPackageJson(package_: string): Promise<string> {
+  const minimalPackageJson = {
+    name: 'depsweep-temp',
+    version: '1.0.0',
+    private: true,
+    dependencies: { [package_]: '*' },
+  };
+
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'depsweep-'));
+  const packageJsonPath = path.join(temporaryDirectory, 'package.json');
+  await writeFile(packageJsonPath, JSON.stringify(minimalPackageJson, null, 2));
+
+  return temporaryDirectory;
+}
+
+async function measurePackageInstallation(
+  packageName: string,
+): Promise<InstallMetrics> {
+  const metrics: InstallMetrics = {
+    installTime: 0,
+    diskSpace: 0,
+    errors: [],
+  };
+
+  try {
+    // Create temp directory with package.json
+    const temporaryDirectory = await createTemporaryPackageJson(packageName);
+
+    // Measure install time
+    const startTime = Date.now();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const install = spawn('npm', ['install', '--no-package-lock'], {
+          cwd: temporaryDirectory,
+          stdio: 'ignore',
+        });
+
+        install.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`npm install failed with code ${code}`));
+        });
+        install.on('error', reject);
+      });
+    } catch (error) {
+      metrics.errors?.push(`Install error: ${(error as Error).message}`);
+    }
+
+    metrics.installTime = (Date.now() - startTime) / 1000;
+
+    // Measure disk space
+    const nodeModulesPath = path.join(temporaryDirectory, 'node_modules');
+    metrics.diskSpace = getDirectorySize(nodeModulesPath);
+
+    // Cleanup
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  } catch (error) {
+    metrics.errors?.push(`Measurement error: ${(error as Error).message}`);
+  }
+
+  return metrics;
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -1212,30 +1282,70 @@ async function main(): Promise<void> {
         activeSpinner = measureSpinner;
 
         let totalInstallTime = 0;
+        let totalDiskSpace = 0;
         const totalPackages = unusedDependencies.length;
-        const installResults: { dep: string; time: number }[] = [];
+        const installResults: {
+          dep: string;
+          time: number;
+          space: number;
+          errors?: string[];
+        }[] = [];
 
         for (let index = 0; index < totalPackages; index++) {
           const dep = unusedDependencies[index];
-          let time = 0;
           try {
-            time = await measureInstallTime(dep);
-            totalInstallTime += time;
-            installResults.push({ dep, time });
+            const metrics = await measurePackageInstallation(dep);
+            totalInstallTime += metrics.installTime;
+            totalDiskSpace += metrics.diskSpace;
+
+            installResults.push({
+              dep,
+              time: metrics.installTime,
+              space: metrics.diskSpace,
+              errors: metrics.errors,
+            });
+
             const progress = `${index + 1}/${totalPackages}`;
             measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(progress)}`;
-          } catch {
-            // Ignore errors and continue
+          } catch (error) {
+            console.error(`Error measuring ${dep}:`, error);
           }
         }
 
         measureSpinner.succeed(
           `${MESSAGES.measureComplete} ${chalk.blue(`[${totalPackages}/${totalPackages}]`)}`,
         );
-        for (const entry of installResults)
-          console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`);
+
+        // Create a table for detailed results
+        const table = new CliTable({
+          head: ['Package', 'Install Time', 'Disk Space'],
+          style: { head: ['cyan'] },
+        });
+
+        for (const result of installResults) {
+          table.push([
+            result.dep,
+            `${result.time.toFixed(2)}s`,
+            formatSize(result.space),
+          ]);
+
+          if (result.errors?.length) {
+            table.push([
+              {
+                colSpan: 3,
+                content: chalk.red(`Errors: ${result.errors.join(', ')}`),
+              },
+            ]);
+          }
+        }
+
+        console.log(table.toString());
+        console.log('\nTotal Impact:');
         console.log(
-          `${MESSAGES.installTime} ${chalk.bold(`~${totalInstallTime.toFixed(2)}s`)}`,
+          `${MESSAGES.installTime} ${chalk.bold(`${totalInstallTime.toFixed(2)}s`)}`,
+        );
+        console.log(
+          `${MESSAGES.diskSpace} ${chalk.bold(formatSize(totalDiskSpace))}`,
         );
       }
 
