@@ -1,0 +1,39 @@
+name: Impact Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_manager:
+        description: 'Package manager'
+        required: true
+        type: choice
+        options:
+          - npm
+        default: 'npm'
+      package_name:
+        description: 'Package to analyze'
+        required: true
+        type: string
+
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'latest'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm i
+
+      - name: Run depsweep
+        run: |
+          npx depsweep@latest impact ${{ github.event.inputs.package_name }} > output.txt
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
