@@ -12,8 +12,7 @@ import * as readline from 'node:readline/promises';
 import v8 from 'node:v8';
 
 import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
-import type { NodePath } from '@babel/traverse';
+import traverse, { type NodePath } from '@babel/traverse';
 import type {
   ImportDeclaration,
   CallExpression,
@@ -28,8 +27,7 @@ import { findUp } from 'find-up';
 import { globby } from 'globby';
 import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
-import ora from 'ora';
-import type { Ora } from 'ora';
+import ora, { type Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
 /*
@@ -1106,6 +1104,178 @@ async function getParentPackageDownloads(packageJsonPath: string): Promise<{
   }
 }
 
+interface ExtendedImpactStats {
+  daily?: {
+    downloads: number;
+    diskSpace: number;
+    installTime: number;
+  };
+  monthly?: {
+    downloads: number;
+    diskSpace: number;
+    installTime: number;
+  };
+  yearly?: {
+    downloads: number;
+    diskSpace: number;
+    installTime: number;
+  };
+  [key: string]:
+    | {
+        downloads: number;
+        diskSpace: number;
+        installTime: number;
+      }
+    | undefined;
+}
+
+async function getYearlyDownloads(
+  packageName: string,
+  months: number = 12,
+): Promise<{ total: number; monthsFetched: number; startDate: string } | null> {
+  const monthlyDownloads: number[] = [];
+  const currentDate = new Date();
+  let monthsFetched = 0;
+  let startDate = '';
+
+  for (let index = 0; index < months; index++) {
+    const start = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - index,
+      1,
+    );
+    const end = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - index + 1,
+      0,
+    );
+    const startString = start.toISOString().split('T')[0];
+    const endString = end.toISOString().split('T')[0];
+
+    try {
+      const response = await fetch(
+        `https://api.npmjs.org/downloads/range/${startString}:${endString}/${packageName}`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = (await response.json()) as {
+        downloads: { downloads: number; day: string }[];
+      };
+
+      if (data.downloads && Array.isArray(data.downloads)) {
+        // Trim leading days with downloads: 0
+        const firstNonZeroIndex = data.downloads.findIndex(
+          (day) => day.downloads > 0,
+        );
+        const trimmedDownloads =
+          firstNonZeroIndex === -1
+            ? data.downloads
+            : data.downloads.slice(firstNonZeroIndex);
+
+        const monthlySum = trimmedDownloads.reduce(
+          (accumulator, day) => accumulator + day.downloads,
+          0,
+        );
+        monthlyDownloads.push(monthlySum);
+        monthsFetched++;
+        if (!startDate && monthlySum > 0) {
+          startDate =
+            trimmedDownloads.find((day) => day.downloads > 0)?.day ||
+            startString;
+        }
+      }
+    } catch (error) {
+      console.error(
+        `Failed to fetch downloads for ${startString} to ${endString}:`,
+        error,
+      );
+      break; // Stop fetching if an error occurs
+    }
+  }
+
+  if (monthlyDownloads.length === 0) {
+    return null;
+  }
+
+  const totalDownloads = monthlyDownloads.reduce(
+    (a: number, b: number) => a + b,
+    0,
+  );
+  return { total: totalDownloads, monthsFetched, startDate };
+}
+
+function calculateExtendedStats(
+  diskSpace: number,
+  installTime: number,
+  monthlyDownloads: number | null,
+  yearlyData: {
+    total: number;
+    monthsFetched: number;
+    startDate: string;
+  } | null,
+): ExtendedImpactStats {
+  const stats: ExtendedImpactStats = {};
+
+  if (!yearlyData) {
+    return stats;
+  }
+
+  const { total, monthsFetched, startDate } = yearlyData;
+
+  const daysInPeriod = monthsFetched * 30;
+  const dailyDownloads = Math.round(total / daysInPeriod);
+  stats.daily = {
+    downloads: dailyDownloads,
+    diskSpace: diskSpace * dailyDownloads,
+    installTime: installTime * dailyDownloads,
+  };
+
+  if (monthsFetched < 12) {
+    stats.monthly = {
+      downloads: total,
+      diskSpace: diskSpace * total,
+      installTime: installTime * total,
+    };
+  }
+
+  if (monthsFetched === 12) {
+    stats.yearly = {
+      downloads: total,
+      diskSpace: diskSpace * total,
+      installTime: installTime * total,
+    };
+  } else if (monthsFetched > 1) {
+    stats[`last_${monthsFetched}_months`] = {
+      downloads: total,
+      diskSpace: diskSpace * total,
+      installTime: installTime * total,
+    };
+  }
+
+  return stats;
+}
+
+function displayImpactTable(
+  impactData: Record<string, { installTime: string; diskSpace: string }>,
+) {
+  const table = new CliTable({
+    head: ['Package', 'Install Time', 'Disk Space'],
+    colWidths: [20, 15, 15],
+    wordWrap: true,
+    style: {
+      head: ['cyan'],
+      border: ['grey'],
+    },
+  });
+
+  for (const [package_, data] of Object.entries(impactData)) {
+    table.push([package_, data.installTime, data.diskSpace]);
+  }
+
+  console.log(table.toString());
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -1381,29 +1551,19 @@ async function main(): Promise<void> {
         );
 
         // Create a table for detailed results
-        const table = new CliTable({
-          head: ['Package', 'Install Time', 'Disk Space'],
-          style: { head: ['cyan'] },
-        });
-
+        const impactData: Record<
+          string,
+          { installTime: string; diskSpace: string }
+        > = {};
         for (const result of installResults) {
-          table.push([
-            result.dep,
-            `${result.time.toFixed(2)}s`,
-            formatSize(result.space),
-          ]);
-
-          if (result.errors?.length) {
-            table.push([
-              {
-                colSpan: 3,
-                content: chalk.red(`Errors: ${result.errors.join(', ')}`),
-              },
-            ]);
-          }
+          impactData[result.dep] = {
+            installTime: `${result.time.toFixed(2)}s`,
+            diskSpace: formatSize(result.space),
+          };
         }
 
-        console.log(table.toString());
+        displayImpactTable(impactData);
+
         console.log('\nTotal Impact:');
         console.log(
           `${MESSAGES.installTime} ${chalk.bold(`${totalInstallTime.toFixed(2)}s`)}`,
@@ -1423,25 +1583,76 @@ async function main(): Promise<void> {
 
         const parentInfo = await getParentPackageDownloads(packageJsonPath);
         if (parentInfo) {
-          const monthlyDiskImpact = totalDiskSpace * parentInfo.downloads;
-          const monthlyTimeImpact = totalInstallTime * parentInfo.downloads;
+          const yearlyData = await getYearlyDownloads(parentInfo.name);
+          const stats = calculateExtendedStats(
+            totalDiskSpace,
+            totalInstallTime,
+            parentInfo.downloads,
+            yearlyData,
+          );
 
-          console.log('\nExtended Impact:');
+          const impactTable = new CliTable({
+            head: ['Period', 'Downloads', 'Data Transfer', 'Install Time'],
+            style: { head: ['cyan'] },
+          });
+
+          if (stats.daily) {
+            impactTable.push([
+              'Day',
+              formatNumber(stats.daily.downloads),
+              formatSize(stats.daily.diskSpace),
+              formatTime(stats.daily.installTime),
+            ]);
+          }
+
+          if (stats.monthly) {
+            // Ensure monthly stats are only added when not a full year
+            impactTable.push([
+              'Month',
+              formatNumber(stats.monthly.downloads),
+              formatSize(stats.monthly.diskSpace),
+              formatTime(stats.monthly.installTime),
+            ]);
+          }
+
+          if (yearlyData?.monthsFetched === 12 && stats.yearly) {
+            impactTable.push([
+              'Year',
+              formatNumber(stats.yearly.downloads),
+              formatSize(stats.yearly.diskSpace),
+              formatTime(stats.yearly.installTime),
+            ]);
+          } else if (
+            yearlyData?.monthsFetched &&
+            yearlyData.monthsFetched > 1 &&
+            stats[`last_${yearlyData.monthsFetched}_months`]
+          ) {
+            impactTable.push([
+              `Last ${yearlyData.monthsFetched} Months`,
+              formatNumber(
+                stats[`last_${yearlyData.monthsFetched}_months`]?.downloads ??
+                  0,
+              ),
+              formatSize(
+                stats[`last_${yearlyData.monthsFetched}_months`]?.diskSpace ??
+                  0,
+              ),
+              formatTime(
+                stats[`last_${yearlyData.monthsFetched}_months`]?.installTime ??
+                  0,
+              ),
+            ]);
+          }
+
           console.log(
-            `  ${chalk.yellow(parentInfo.name)} monthly downloads: ${chalk.bold(formatNumber(parentInfo.downloads))}`,
+            `\n${chalk.bold('Extended Impact Analysis for')} ${chalk.yellow(parentInfo.name)}:`,
           );
-          console.log(
-            `  Potential monthly data transfer for unused deps: ${chalk.bold(formatSize(monthlyDiskImpact))}`,
-          );
-          console.log(
-            `  Potential monthly install time for unused deps: ${chalk.bold(formatTime(monthlyTimeImpact))}`,
-          );
+          console.log(impactTable.toString());
         } else {
           console.log(
-            chalk.yellow('\nNo usage data found for the parent package.'),
+            chalk.yellow('\nInsufficient download data to calculate impact.'),
           );
         }
-
         extendedSpinner.succeed('Extended impact data collected');
       }
 
