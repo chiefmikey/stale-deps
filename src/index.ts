@@ -46,7 +46,7 @@ const PROTECTED_PACKAGES = new Set([
 // Common string literals
 const CLI_STRINGS = {
   PROGRESS_FORMAT:
-    'Analyzing dependencies |{bar}| {percentage}% | {value}/{total} Files',
+    'Analyzing dependencies |{bar}| {currentDeps}/{totalDeps} Dependencies | {currentFiles}/{totalFiles} Files | {percentage}%',
   BAR_COMPLETE: '\u2588',
   BAR_INCOMPLETE: '\u2591',
   CLI_NAME: 'depsweep',
@@ -97,7 +97,7 @@ const MESSAGES = {
   dependenciesRemoved: 'Dependencies:',
   diskSpace: 'Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
-  measuringInstallTime: 'Measuring installation...',
+  measuringInstallTime: 'Measuring...',
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
   analysisComplete: 'Analysis complete',
@@ -778,17 +778,20 @@ async function processFilesInParallel(
 
   const results: string[] = [];
   let totalErrors = 0;
+  let processedFiles = 0;
 
   const processFile = async (
     file: string,
   ): Promise<{ result: string | null; hasError: boolean }> => {
     try {
       const used = await isDependencyUsedInFile(dependency, file, context);
+      processedFiles++;
       return { result: used ? file : null, hasError: false };
     } catch (error) {
       console.error(
         chalk.red(`Error processing ${file}: ${(error as Error).message}`),
       );
+      processedFiles++;
       return { result: null, hasError: true };
     }
   };
@@ -802,7 +805,9 @@ async function processFilesInParallel(
 
     results.push(...validResults);
     totalErrors += errors;
-    onProgress?.(Math.min(index + BATCH_SIZE, files.length), files.length);
+
+    const processed = Math.min(index + batch.length, files.length);
+    onProgress?.(processed, files.length);
   }
 
   if (totalErrors > 0) {
@@ -1135,8 +1140,8 @@ async function getYearlyDownloads(
 ): Promise<{ total: number; monthsFetched: number; startDate: string } | null> {
   const monthlyDownloads: number[] = [];
   const currentDate = new Date();
-  let monthsFetched = 0;
   let startDate = '';
+  let monthsFetched = 0;
 
   for (let index = 0; index < months; index++) {
     const start = new Date(
@@ -1164,44 +1169,59 @@ async function getYearlyDownloads(
       };
 
       if (data.downloads && Array.isArray(data.downloads)) {
-        // Trim leading days with downloads: 0
-        const firstNonZeroIndex = data.downloads.findIndex(
-          (day) => day.downloads > 0,
-        );
-        const trimmedDownloads =
-          firstNonZeroIndex === -1
-            ? data.downloads
-            : data.downloads.slice(firstNonZeroIndex);
-
-        const monthlySum = trimmedDownloads.reduce(
-          (accumulator, day) => accumulator + day.downloads,
+        // Sum all daily downloads for that month
+        const monthTotal = data.downloads.reduce(
+          (accumulator, dayItem) => accumulator + (dayItem.downloads || 0),
           0,
         );
-        monthlyDownloads.push(monthlySum);
-        monthsFetched++;
-        if (!startDate && monthlySum > 0) {
-          startDate =
-            trimmedDownloads.find((day) => day.downloads > 0)?.day ||
-            startString;
+        monthlyDownloads.push(monthTotal);
+
+        // Capture the earliest date containing non-zero data
+        if (monthTotal > 0 && !startDate) {
+          startDate = startString;
         }
+        monthsFetched++;
       }
     } catch (error) {
       console.error(
         `Failed to fetch downloads for ${startString} to ${endString}:`,
         error,
       );
-      break; // Stop fetching if an error occurs
+      break;
     }
   }
 
-  if (monthlyDownloads.length === 0) {
+  // Trim trailing zero months
+  let lastNonZeroIndex = -1;
+  for (let index = monthlyDownloads.length - 1; index >= 0; index--) {
+    if (monthlyDownloads[index] > 0) {
+      lastNonZeroIndex = index;
+      break;
+    }
+  }
+
+  // If no non-zero data found, return null
+  if (lastNonZeroIndex === -1) {
     return null;
   }
 
-  const totalDownloads = monthlyDownloads.reduce(
-    (a: number, b: number) => a + b,
-    0,
-  );
+  // Recalculate monthsFetched and remove trailing zeros
+  monthlyDownloads.splice(lastNonZeroIndex + 1);
+  monthsFetched = monthlyDownloads.length;
+
+  // If the recorded startDate is empty (all leading zero months?), set it to the latest non-zero period
+  if (!startDate) {
+    const validMonthsAgo = monthsFetched - 1;
+    const trimmedStart = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - validMonthsAgo,
+      1,
+    );
+    startDate = trimmedStart.toISOString().split('T')[0];
+  }
+
+  // Sum total
+  const totalDownloads = monthlyDownloads.reduce((a, b) => a + b, 0);
   return { total: totalDownloads, monthsFetched, startDate };
 }
 
@@ -1221,35 +1241,46 @@ function calculateExtendedStats(
     return stats;
   }
 
-  const { total, monthsFetched, startDate } = yearlyData;
-
-  const daysInPeriod = monthsFetched * 30;
-  const dailyDownloads = Math.round(total / daysInPeriod);
-  stats.daily = {
-    downloads: dailyDownloads,
-    diskSpace: diskSpace * dailyDownloads,
-    installTime: installTime * dailyDownloads,
-  };
-
-  if (monthsFetched < 12) {
-    stats.monthly = {
-      downloads: total,
-      diskSpace: diskSpace * total,
-      installTime: installTime * total,
-    };
+  const { total, monthsFetched } = yearlyData;
+  const daysCount = monthsFetched * 30;
+  if (daysCount === 0 || total === 0) {
+    return stats;
   }
 
-  if (monthsFetched === 12) {
+  // Compute daily average
+  const dailyAvg = total / daysCount;
+
+  // Replace with day based on up to 30 days
+  const relevantDays = Math.min(30, daysCount);
+  const daySum = dailyAvg * relevantDays;
+  const dayAverage = daySum / relevantDays;
+  stats.day = {
+    downloads: Math.round(dayAverage),
+    diskSpace: diskSpace * dayAverage,
+    installTime: installTime * dayAverage,
+  };
+
+  // 30-day (Monthly)
+  stats.monthly = {
+    downloads: Math.round(dailyAvg * 30),
+    diskSpace: diskSpace * dailyAvg * 30,
+    installTime: installTime * dailyAvg * 30,
+  };
+
+  // Last X months
+  stats[`last_${monthsFetched}_months`] = {
+    downloads: Math.round(dailyAvg * daysCount),
+    diskSpace: diskSpace * dailyAvg * daysCount,
+    installTime: installTime * dailyAvg * daysCount,
+  };
+
+  // If we have at least 12 months, add yearly
+  if (monthsFetched >= 12) {
+    const yearlyDays = 12 * 30;
     stats.yearly = {
-      downloads: total,
-      diskSpace: diskSpace * total,
-      installTime: installTime * total,
-    };
-  } else if (monthsFetched > 1) {
-    stats[`last_${monthsFetched}_months`] = {
-      downloads: total,
-      diskSpace: diskSpace * total,
-      installTime: installTime * total,
+      downloads: Math.round(dailyAvg * yearlyDays),
+      diskSpace: diskSpace * dailyAvg * yearlyDays,
+      installTime: installTime * dailyAvg * yearlyDays,
     };
   }
 
@@ -1371,8 +1402,10 @@ async function main(): Promise<void> {
     const dependencyUsage: Record<string, string[]> = {};
     const typePackageSupport: Record<string, string> = {};
 
+    let processedFiles = 0;
     let processedDependencies = 0;
-    const totalFiles = dependencies.length * sourceFiles.length;
+    const totalDependencies = dependencies.length;
+    const totalFiles = sourceFiles.length;
 
     let progressBar: cliProgress.SingleBar | null = null;
     if (options.progress) {
@@ -1382,25 +1415,38 @@ async function main(): Promise<void> {
         barIncompleteChar: CLI_STRINGS.BAR_INCOMPLETE,
       });
       activeProgressBar = progressBar;
-      progressBar.start(totalFiles, 0);
+      progressBar.start(totalFiles, 0, {
+        currentDeps: 0,
+        totalDeps: totalDependencies,
+        currentFiles: 0,
+        totalFiles,
+      });
     }
 
     for (const dep of dependencies) {
-      const offset = processedDependencies * sourceFiles.length;
       const usageFiles = await processFilesInParallel(
         sourceFiles,
         dep,
         context,
         (processed) => {
           if (progressBar) {
-            progressBar.update(offset + processed);
+            processedFiles = processed;
+            progressBar.update(processed, {
+              currentDeps: processedDependencies,
+              totalDeps: totalDependencies,
+              currentFiles: processed,
+              totalFiles,
+            });
           }
         },
       );
 
       processedDependencies++;
       if (progressBar) {
-        progressBar.update(processedDependencies * sourceFiles.length);
+        progressBar.update({
+          currentDeps: processedDependencies,
+          currentFiles: processedFiles,
+        });
       }
 
       if (usageFiles.length === 0) {
@@ -1539,7 +1585,7 @@ async function main(): Promise<void> {
               errors: metrics.errors,
             });
 
-            const progress = `${index + 1}/${totalPackages}`;
+            const progress = `[${index + 1}/${totalPackages}]`;
             measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(progress)}`;
           } catch (error) {
             console.error(`Error measuring ${dep}:`, error);
@@ -1576,7 +1622,7 @@ async function main(): Promise<void> {
       if (options.extendedImpact) {
         console.log('');
         const extendedSpinner = ora({
-          text: 'Collecting extended impact...',
+          text: 'Measuring extended impact...',
           spinner: 'dots',
         }).start();
         activeSpinner = extendedSpinner;
@@ -1591,17 +1637,21 @@ async function main(): Promise<void> {
             yearlyData,
           );
 
+          // Update spinner text and stop it before showing results
+          extendedSpinner.text = 'Measuring complete';
+          extendedSpinner.stopAndPersist({ symbol: chalk.green('✔') });
+
           const impactTable = new CliTable({
             head: ['Period', 'Downloads', 'Data Transfer', 'Install Time'],
             style: { head: ['cyan'] },
           });
 
-          if (stats.daily) {
+          if (stats.day) {
             impactTable.push([
               'Day',
-              formatNumber(stats.daily.downloads),
-              formatSize(stats.daily.diskSpace),
-              formatTime(stats.daily.installTime),
+              `~${formatNumber(stats.day.downloads)}`,
+              formatSize(stats.day.diskSpace),
+              formatTime(stats.day.installTime),
             ]);
           }
 
@@ -1615,9 +1665,13 @@ async function main(): Promise<void> {
             ]);
           }
 
-          if (yearlyData?.monthsFetched === 12 && stats.yearly) {
+          if (
+            yearlyData?.monthsFetched === 12 &&
+            stats.yearly &&
+            stats.yearly.downloads > 0
+          ) {
             impactTable.push([
-              'Year',
+              'Last 12 months',
               formatNumber(stats.yearly.downloads),
               formatSize(stats.yearly.diskSpace),
               formatTime(stats.yearly.installTime),
@@ -1625,35 +1679,32 @@ async function main(): Promise<void> {
           } else if (
             yearlyData?.monthsFetched &&
             yearlyData.monthsFetched > 1 &&
-            stats[`last_${yearlyData.monthsFetched}_months`]
+            stats[`last_${yearlyData.monthsFetched}_months`] &&
+            (stats[`last_${yearlyData.monthsFetched}_months`]?.downloads ?? 0) >
+              0
           ) {
+            const label = `Last ${yearlyData.monthsFetched} months`;
+            const periodStats =
+              stats[`last_${yearlyData.monthsFetched}_months`];
             impactTable.push([
-              `Last ${yearlyData.monthsFetched} Months`,
-              formatNumber(
-                stats[`last_${yearlyData.monthsFetched}_months`]?.downloads ??
-                  0,
-              ),
-              formatSize(
-                stats[`last_${yearlyData.monthsFetched}_months`]?.diskSpace ??
-                  0,
-              ),
-              formatTime(
-                stats[`last_${yearlyData.monthsFetched}_months`]?.installTime ??
-                  0,
-              ),
+              label,
+              formatNumber(periodStats?.downloads ?? 0),
+              formatSize(periodStats?.diskSpace ?? 0),
+              formatTime(periodStats?.installTime ?? 0),
             ]);
           }
 
           console.log(
-            `\n${chalk.bold('Extended Impact Analysis for')} ${chalk.yellow(parentInfo.name)}:`,
+            `${chalk.bold('Extended Impact Analysis for')} ${chalk.yellow(parentInfo.name)}:`,
           );
           console.log(impactTable.toString());
         } else {
+          extendedSpinner.text = 'Measuring complete';
+          extendedSpinner.stopAndPersist({ symbol: chalk.green('✔') });
           console.log(
             chalk.yellow('\nInsufficient download data to calculate impact.'),
           );
         }
-        extendedSpinner.succeed('Extended impact data collected');
       }
 
       if (options.verbose) {
