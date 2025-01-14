@@ -1289,6 +1289,8 @@ function calculateExtendedStats(
 
 function displayImpactTable(
   impactData: Record<string, { installTime: string; diskSpace: string }>,
+  totalInstallTime: number,
+  totalDiskSpace: number,
 ) {
   const table = new CliTable({
     head: ['Package', 'Install Time', 'Disk Space'],
@@ -1303,6 +1305,13 @@ function displayImpactTable(
   for (const [package_, data] of Object.entries(impactData)) {
     table.push([package_, data.installTime, data.diskSpace]);
   }
+
+  // Add totals row with separator
+  table.push([
+    chalk.bold('Total'),
+    chalk.bold(`${totalInstallTime.toFixed(2)}s`),
+    chalk.bold(formatSize(totalDiskSpace)),
+  ]);
 
   console.log(table.toString());
 }
@@ -1608,15 +1617,7 @@ async function main(): Promise<void> {
           };
         }
 
-        displayImpactTable(impactData);
-
-        console.log('\nTotal Impact:');
-        console.log(
-          `${MESSAGES.installTime} ${chalk.bold(`${totalInstallTime.toFixed(2)}s`)}`,
-        );
-        console.log(
-          `${MESSAGES.diskSpace} ${chalk.bold(formatSize(totalDiskSpace))}`,
-        );
+        displayImpactTable(impactData, totalInstallTime, totalDiskSpace);
       }
 
       if (options.extendedImpact) {
