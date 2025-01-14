@@ -95,7 +95,7 @@ const MESSAGES = {
   noChangesMade: '\nNo changes made',
   promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
-  diskSpace: 'Disk Space:',
+  diskSpace: 'Unpacked Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
   measuringInstallTime: 'Measuring...',
   measureComplete: 'Measurement complete',
@@ -1380,11 +1380,7 @@ async function main(): Promise<void> {
 
     console.log(chalk.cyan(MESSAGES.title));
     console.log(chalk.bold('Dependency Analysis\n'));
-    console.log(
-      `Package.json found at: ${chalk.green(
-        path.relative(process.cwd(), packageJsonPath),
-      )}`,
-    );
+    console.log(chalk.blue(`Package.json found at: ${packageJsonPath}`));
 
     process.on('uncaughtException', (error: Error): void => {
       console.error(chalk.red(MESSAGES.fatalError), error);
