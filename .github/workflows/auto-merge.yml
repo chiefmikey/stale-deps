@@ -1,0 +1,47 @@
+name: Auto-Merge
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types: [opened, synchronize]
+    paths:
+      - 'package.json'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    steps:
+      - name: Check if major version update
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prTitle = context.payload.pull_request.title;
+            const versionMatch = prTitle.match(/bump .* from ([0-9]+\.[0-9]+\.[0-9]+) to ([0-9]+\.[0-9]+\.[0-9]+)/);
+            if (versionMatch) {
+              const oldMajor = versionMatch[1].split('.')[0];
+              const newMajor = versionMatch[2].split('.')[0];
+              return oldMajor !== newMajor;
+            }
+            return false;
+
+      - name: Approve PR
+        if: ${{ steps.check.outputs.result == 'false' }}
+        run: gh pr review "$PR_URL" --approve
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.ADMIN_PAT }}
+
+      - name: Enable auto-merge for Dependabot PRs
+        if: ${{ steps.check.outputs.result == 'false' }}
+        run: gh pr merge "$PR_URL" --auto --squash --delete-branch --subject "$COMMIT_MESSAGE"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: ${{ github.event.pull_request.title }}
