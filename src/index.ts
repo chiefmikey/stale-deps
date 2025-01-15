@@ -4,14 +4,15 @@
 import { execSync, spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import v8 from 'node:v8';
 
 import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
-import type { NodePath } from '@babel/traverse';
+import traverse, { type NodePath } from '@babel/traverse';
 import type {
   ImportDeclaration,
   CallExpression,
@@ -26,8 +27,7 @@ import { findUp } from 'find-up';
 import { globby } from 'globby';
 import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
-import ora from 'ora';
-import type { Ora } from 'ora';
+import ora, { type Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
 /*
@@ -46,7 +46,7 @@ const PROTECTED_PACKAGES = new Set([
 // Common string literals
 const CLI_STRINGS = {
   PROGRESS_FORMAT:
-    'Analyzing dependencies |{bar}| {percentage}% | {value}/{total} Files',
+    'Analyzing dependencies |{bar}| {currentFiles}/{totalFiles} Files | {currentDeps}/{totalDeps} Dependencies | {percentage}%',
   BAR_COMPLETE: '\u2588',
   BAR_INCOMPLETE: '\u2591',
   CLI_NAME: 'depsweep',
@@ -93,11 +93,11 @@ const MESSAGES = {
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:',
   noChangesMade: '\nNo changes made',
-  promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
+  promptRemove: '\n\nDo you want to remove these unused dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
-  diskSpace: 'Disk Space:',
+  diskSpace: 'Unpacked Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
-  measuringInstallTime: 'Measuring installation...',
+  measuringImpact: 'Measuring impact...',
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
   analysisComplete: 'Analysis complete',
@@ -802,7 +802,9 @@ async function processFilesInParallel(
 
     results.push(...validResults);
     totalErrors += errors;
-    onProgress?.(Math.min(index + BATCH_SIZE, files.length), files.length);
+
+    const processed = Math.min(index + batch.length, files.length);
+    onProgress?.(processed, files.length);
   }
 
   if (totalErrors > 0) {
@@ -856,65 +858,17 @@ function cleanup(): void {
   }
 }
 
-// Add a helper function to fetch package size from npm
-async function getPackageSizeFromNpm(
-  packageName: string,
-): Promise<number | null> {
-  try {
-    // Minimal approach: fetch from npm registry
-    const response = await fetch(`https://registry.npmjs.org/${packageName}`);
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    // Some packages store metadata in "dist.unpackedSize" for the latest version
-    const versions = (data as { versions: Record<string, any> }).versions || {};
-    if (typeof data === 'object' && data !== null && 'dist-tags' in data) {
-      const latest = (data as { 'dist-tags': { latest: string } })['dist-tags']
-        ?.latest;
-      if (latest && versions[latest]?.dist?.unpackedSize) {
-        return versions[latest].dist.unpackedSize;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Measure install time by running a subprocess
-async function measureInstallTime(package_: string): Promise<number> {
-  if (!isValidPackageName(package_)) {
-    throw new Error(`Invalid package name: ${package_}`);
-  }
-
-  const start = Date.now();
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('npm', ['install', package_], {
-      stdio: 'ignore',
-      cwd: process.cwd(),
-      timeout: 300_000,
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Install process exited with code ${code}.`));
-    });
-  });
-  return (Date.now() - start) / 1000;
-}
-
 // Add this validation function
 function isValidPackageName(name: string): boolean {
   return FILE_PATTERNS.PACKAGE_NAME_REGEX.test(name);
 }
 
 // Recursively compute dir size for accurate disk usage stats
-function getDirectorySize(dir: string): number {
+function getDirectorySize(directory: string): number {
   let total = 0;
-  const files = readdirSync(dir, { withFileTypes: true });
+  const files = readdirSync(directory, { withFileTypes: true });
   for (const f of files) {
-    const fullPath = path.join(dir, f.name);
+    const fullPath = path.join(directory, f.name);
     total += f.isDirectory()
       ? getDirectorySize(fullPath)
       : statSync(fullPath).size;
@@ -924,14 +878,16 @@ function getDirectorySize(dir: string): number {
 
 // Add a helper function to format bytes into human-readable strings
 function formatSize(bytes: number): string {
-  if (bytes >= 1e9) {
-    return `${(bytes / 1e9).toFixed(2)} GB`;
+  if (bytes >= 1e12) {
+    return `${(bytes / 1e12).toFixed(2)} ${chalk.blue('TB')}`;
+  } else if (bytes >= 1e9) {
+    return `${(bytes / 1e9).toFixed(2)} ${chalk.blue('GB')}`;
   } else if (bytes >= 1e6) {
-    return `${(bytes / 1e6).toFixed(2)} MB`;
+    return `${(bytes / 1e6).toFixed(2)} ${chalk.blue('MB')}`;
   } else if (bytes >= 1e3) {
-    return `${(bytes / 1e3).toFixed(2)} KB`;
+    return `${(bytes / 1e3).toFixed(2)} ${chalk.blue('KB')}`;
   }
-  return `${bytes} Bytes`;
+  return `${bytes} ${chalk.blue('Bytes')}`;
 }
 
 // Add this validation at the top with other constants
@@ -977,6 +933,339 @@ function safeExecSync(
   }
 }
 
+interface InstallMetrics {
+  installTime: number;
+  diskSpace: number;
+  errors?: string[];
+}
+
+async function createTemporaryPackageJson(package_: string): Promise<string> {
+  const minimalPackageJson = {
+    name: 'depsweep-temp',
+    version: '1.0.0',
+    private: true,
+    dependencies: { [package_]: '*' },
+  };
+
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'depsweep-'));
+  const packageJsonPath = path.join(temporaryDirectory, 'package.json');
+  await writeFile(packageJsonPath, JSON.stringify(minimalPackageJson, null, 2));
+
+  return temporaryDirectory;
+}
+
+async function measurePackageInstallation(
+  packageName: string,
+): Promise<InstallMetrics> {
+  const metrics: InstallMetrics = {
+    installTime: 0,
+    diskSpace: 0,
+    errors: [],
+  };
+
+  try {
+    // Create temp directory with package.json
+    const temporaryDirectory = await createTemporaryPackageJson(packageName);
+
+    // Measure install time
+    const startTime = Date.now();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const install = spawn('npm', ['install', '--no-package-lock'], {
+          cwd: temporaryDirectory,
+          stdio: 'ignore',
+        });
+
+        install.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`npm install failed with code ${code}`));
+        });
+        install.on('error', reject);
+      });
+    } catch (error) {
+      metrics.errors?.push(`Install error: ${(error as Error).message}`);
+    }
+
+    metrics.installTime = (Date.now() - startTime) / 1000;
+
+    // Measure disk space
+    const nodeModulesPath = path.join(temporaryDirectory, 'node_modules');
+    metrics.diskSpace = getDirectorySize(nodeModulesPath);
+
+    // Cleanup
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  } catch (error) {
+    metrics.errors?.push(`Measurement error: ${(error as Error).message}`);
+  }
+
+  return metrics;
+}
+
+async function getDownloadStatsFromNpm(
+  packageName: string,
+): Promise<number | null> {
+  try {
+    const response = await fetch(
+      `https://api.npmjs.org/downloads/point/last-month/${packageName}`,
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    const downloadData = data as { downloads: number };
+    return downloadData.downloads || null;
+  } catch {
+    return null;
+  }
+}
+
+function formatTime(seconds: number): string {
+  if (seconds >= 86_400) {
+    return `${(seconds / 86_400).toFixed(2)} ${chalk.blue('Days')}`;
+  } else if (seconds >= 3600) {
+    return `${(seconds / 3600).toFixed(2)} ${chalk.blue('Hours')}`;
+  } else if (seconds >= 60) {
+    return `${(seconds / 60).toFixed(2)} ${chalk.blue('Minutes')}`;
+  }
+  return `${seconds.toFixed(2)} ${chalk.blue('Seconds')}`;
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString();
+}
+
+async function getParentPackageDownloads(packageJsonPath: string): Promise<{
+  name: string;
+  downloads: number;
+} | null> {
+  try {
+    const packageJsonString =
+      (await fs.readFile(packageJsonPath, 'utf8')) || '{}';
+    const packageJson = JSON.parse(packageJsonString);
+    const { name } = packageJson;
+    if (!name) return null;
+
+    const downloads = await getDownloadStatsFromNpm(name);
+    if (!downloads) {
+      console.log(
+        chalk.yellow(`\nUnable to find download stats for '${name}'`),
+      );
+      return null;
+    }
+    return { name, downloads };
+  } catch {
+    return null;
+  }
+}
+
+interface measureImpactStats {
+  daily?: {
+    downloads: number;
+    diskSpace: number;
+    installTime: number;
+  };
+  monthly?: {
+    downloads: number;
+    diskSpace: number;
+    installTime: number;
+  };
+  yearly?: {
+    downloads: number;
+    diskSpace: number;
+    installTime: number;
+  };
+  [key: string]:
+    | {
+        downloads: number;
+        diskSpace: number;
+        installTime: number;
+      }
+    | undefined;
+}
+
+async function getYearlyDownloads(
+  packageName: string,
+  months: number = 12,
+): Promise<{ total: number; monthsFetched: number; startDate: string } | null> {
+  const monthlyDownloads: number[] = [];
+  const currentDate = new Date();
+  let startDate = '';
+  let monthsFetched = 0;
+
+  for (let index = 0; index < months; index++) {
+    const start = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - index,
+      1,
+    );
+    const end = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - index + 1,
+      0,
+    );
+    const [startString] = start.toISOString().split('T');
+    const [endString] = end.toISOString().split('T');
+
+    try {
+      const response = await fetch(
+        `https://api.npmjs.org/downloads/range/${startString}:${endString}/${packageName}`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = (await response.json()) as {
+        downloads: { downloads: number; day: string }[];
+      };
+
+      if (data.downloads && Array.isArray(data.downloads)) {
+        // Sum all daily downloads for that month
+        const monthTotal = data.downloads.reduce(
+          (accumulator, dayItem) => accumulator + (dayItem.downloads || 0),
+          0,
+        );
+        monthlyDownloads.push(monthTotal);
+
+        // Capture the earliest date containing non-zero data
+        if (monthTotal > 0 && !startDate) {
+          startDate = startString;
+        }
+        monthsFetched++;
+      }
+    } catch (error) {
+      console.error(
+        `Failed to fetch downloads for ${startString} to ${endString}:`,
+        error,
+      );
+      break;
+    }
+  }
+
+  // Trim trailing zero months
+  let lastNonZeroIndex = -1;
+  for (let index = monthlyDownloads.length - 1; index >= 0; index--) {
+    if (monthlyDownloads[index] > 0) {
+      lastNonZeroIndex = index;
+      break;
+    }
+  }
+
+  // If no non-zero data found, return null
+  if (lastNonZeroIndex === -1) {
+    return null;
+  }
+
+  // Recalculate monthsFetched and remove trailing zeros
+  monthlyDownloads.splice(lastNonZeroIndex + 1);
+  monthsFetched = monthlyDownloads.length;
+
+  // If the recorded startDate is empty (all leading zero months?), set it to the latest non-zero period
+  if (!startDate) {
+    const validMonthsAgo = monthsFetched - 1;
+    const trimmedStart = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - validMonthsAgo,
+      1,
+    );
+    [startDate] = trimmedStart.toISOString().split('T');
+  }
+
+  // Sum total
+  const totalDownloads = monthlyDownloads.reduce((a, b) => a + b, 0);
+  return { total: totalDownloads, monthsFetched, startDate };
+}
+
+function calculateImpactStats(
+  diskSpace: number,
+  installTime: number,
+  monthlyDownloads: number | null,
+  yearlyData: {
+    total: number;
+    monthsFetched: number;
+    startDate: string;
+  } | null,
+): measureImpactStats {
+  const stats: measureImpactStats = {};
+
+  if (!yearlyData) {
+    return stats;
+  }
+
+  const { total, monthsFetched } = yearlyData;
+  const daysCount = monthsFetched * 30;
+  if (daysCount === 0 || total === 0) {
+    return stats;
+  }
+
+  // Compute daily average
+  const dailyAvg = total / daysCount;
+
+  // Replace with day based on up to 30 days
+  const relevantDays = Math.min(30, daysCount);
+  const daySum = dailyAvg * relevantDays;
+  const dayAverage = daySum / relevantDays;
+  stats.day = {
+    downloads: Math.round(dayAverage),
+    diskSpace: diskSpace * dayAverage,
+    installTime: installTime * dayAverage,
+  };
+
+  // 30-day (Monthly)
+  stats.monthly = {
+    downloads: Math.round(dailyAvg * 30),
+    diskSpace: diskSpace * dailyAvg * 30,
+    installTime: installTime * dailyAvg * 30,
+  };
+
+  // Last X months
+  stats[`last_${monthsFetched}_months`] = {
+    downloads: Math.round(dailyAvg * daysCount),
+    diskSpace: diskSpace * dailyAvg * daysCount,
+    installTime: installTime * dailyAvg * daysCount,
+  };
+
+  // If we have at least 12 months, add yearly
+  if (monthsFetched >= 12) {
+    const yearlyDays = 12 * 30;
+    stats.yearly = {
+      downloads: Math.round(dailyAvg * yearlyDays),
+      diskSpace: diskSpace * dailyAvg * yearlyDays,
+      installTime: installTime * dailyAvg * yearlyDays,
+    };
+  }
+
+  return stats;
+}
+
+function displayImpactTable(
+  impactData: Record<string, { installTime: string; diskSpace: string }>,
+  totalInstallTime: number,
+  totalDiskSpace: number,
+) {
+  const table = new CliTable({
+    head: ['Package', 'Install Time', 'Disk Space'],
+    colWidths: [31, 15, 15],
+    wordWrap: true,
+    style: {
+      head: ['cyan'],
+      border: ['grey'],
+    },
+  });
+
+  for (const [package_, data] of Object.entries(impactData)) {
+    const numericTime = Number.parseFloat(data.installTime);
+    table.push([package_, formatTime(numericTime), data.diskSpace]);
+  }
+
+  // Add totals row with separator
+  table.push([
+    chalk.bold('Total'),
+    chalk.bold(formatTime(totalInstallTime)),
+    chalk.bold(formatSize(totalDiskSpace)),
+  ]);
+
+  console.log(table.toString());
+}
+
 // Main execution
 async function main(): Promise<void> {
   try {
@@ -1006,9 +1295,9 @@ async function main(): Promise<void> {
         'additional dependencies to protect from removal',
       )
       .option('-a, --aggressive', 'allow removal of protected packages')
-      .option('-m, --measure', 'measure saved installation time')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
+      .option('-m, --measure-impact', 'measure unused dependency impact')
       .addHelpText('after', CLI_STRINGS.EXAMPLE_TEXT);
 
     program.exitOverride(() => {
@@ -1037,11 +1326,7 @@ async function main(): Promise<void> {
 
     console.log(chalk.cyan(MESSAGES.title));
     console.log(chalk.bold('Dependency Analysis\n'));
-    console.log(
-      `Package.json found at: ${chalk.green(
-        path.relative(process.cwd(), packageJsonPath),
-      )}`,
-    );
+    console.log(chalk.blue(`Package.json found at: ${packageJsonPath}`));
 
     process.on('uncaughtException', (error: Error): void => {
       console.error(chalk.red(MESSAGES.fatalError), error);
@@ -1068,8 +1353,10 @@ async function main(): Promise<void> {
     const dependencyUsage: Record<string, string[]> = {};
     const typePackageSupport: Record<string, string> = {};
 
+    let processedFiles = 0;
     let processedDependencies = 0;
-    const totalFiles = dependencies.length * sourceFiles.length;
+    const totalDependencies = dependencies.length;
+    const totalFiles = sourceFiles.length;
 
     let progressBar: cliProgress.SingleBar | null = null;
     if (options.progress) {
@@ -1079,25 +1366,38 @@ async function main(): Promise<void> {
         barIncompleteChar: CLI_STRINGS.BAR_INCOMPLETE,
       });
       activeProgressBar = progressBar;
-      progressBar.start(totalFiles, 0);
+      progressBar.start(totalFiles, 0, {
+        currentDeps: 0,
+        totalDeps: totalDependencies,
+        currentFiles: 0,
+        totalFiles,
+      });
     }
 
     for (const dep of dependencies) {
-      const offset = processedDependencies * sourceFiles.length;
       const usageFiles = await processFilesInParallel(
         sourceFiles,
         dep,
         context,
         (processed) => {
           if (progressBar) {
-            progressBar.update(offset + processed);
+            processedFiles = processed;
+            progressBar.update(processed, {
+              currentDeps: processedDependencies,
+              totalDeps: totalDependencies,
+              currentFiles: processed,
+              totalFiles,
+            });
           }
         },
       );
 
       processedDependencies++;
       if (progressBar) {
-        progressBar.update(processedDependencies * sourceFiles.length);
+        progressBar.update({
+          currentDeps: processedDependencies,
+          currentFiles: processedFiles,
+        });
       }
 
       if (usageFiles.length === 0) {
@@ -1178,65 +1478,153 @@ async function main(): Promise<void> {
         );
       }
 
-      let totalSize = 0;
-      const sizePromises = unusedDependencies.map(async (dep) => {
-        const size = await getPackageSizeFromNpm(dep);
-        return size ?? 0;
-      });
-      const sizeResults = await Promise.all(sizePromises);
-      totalSize = sizeResults.reduce(
-        (accumulator, value) => accumulator + value,
-        0,
-      );
+      if (!options.measureImpact) {
+        console.log(
+          chalk.blue(
+            '\nRun with the -m, --measure-impact flag for a detailed impact analysis',
+          ),
+        );
+      }
 
-      // Additional Impact Reporting
-      const removedCount = unusedDependencies.length;
-      const diskSpaceSaved = formatSize(totalSize);
-      const carbonReduction = (removedCount * 0.002).toFixed(3);
+      let totalInstallTime = 0;
+      let totalDiskSpace = 0;
+      const installResults: {
+        dep: string;
+        time: number;
+        space: number;
+        errors?: string[];
+      }[] = [];
 
-      console.log(chalk.bold('\nImpact:'));
-      console.log(
-        `${MESSAGES.dependenciesRemoved} ${chalk.bold(removedCount)}`,
-      );
-      console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved)}`);
-      console.log(
-        `${MESSAGES.carbonFootprint} ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
-      );
-
-      if (options.measure) {
+      if (options.measureImpact) {
         console.log('');
         const measureSpinner = ora({
-          text: MESSAGES.measuringInstallTime,
+          text: MESSAGES.measuringImpact,
           spinner: 'dots',
         }).start();
         activeSpinner = measureSpinner;
 
-        let totalInstallTime = 0;
         const totalPackages = unusedDependencies.length;
-        const installResults: { dep: string; time: number }[] = [];
-
         for (let index = 0; index < totalPackages; index++) {
           const dep = unusedDependencies[index];
-          let time = 0;
           try {
-            time = await measureInstallTime(dep);
-            totalInstallTime += time;
-            installResults.push({ dep, time });
-            const progress = `${index + 1}/${totalPackages}`;
-            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(progress)}`;
-          } catch {
-            // Ignore errors and continue
+            const metrics = await measurePackageInstallation(dep);
+            totalInstallTime += metrics.installTime;
+            totalDiskSpace += metrics.diskSpace;
+
+            installResults.push({
+              dep,
+              time: metrics.installTime,
+              space: metrics.diskSpace,
+              errors: metrics.errors,
+            });
+
+            const progress = `[${index + 1}/${totalPackages}]`;
+            measureSpinner.text = `${MESSAGES.measuringImpact} ${chalk.blue(progress)}`;
+          } catch (error) {
+            console.error(`Error measuring ${dep}:`, error);
           }
         }
 
         measureSpinner.succeed(
           `${MESSAGES.measureComplete} ${chalk.blue(`[${totalPackages}/${totalPackages}]`)}`,
         );
-        for (const entry of installResults)
-          console.log(`${entry.dep}: ${entry.time.toFixed(2)}s`);
+
+        const parentInfo = await getParentPackageDownloads(packageJsonPath);
+
         console.log(
-          `${MESSAGES.installTime} ${chalk.bold(`~${totalInstallTime.toFixed(2)}s`)}`,
+          `\n${chalk.bold('Impact Analysis Report:')} ${chalk.yellow(parentInfo?.name)}`,
         );
+
+        // Create a table for detailed results
+        const impactData: Record<
+          string,
+          { installTime: string; diskSpace: string }
+        > = {};
+        for (const result of installResults) {
+          impactData[result.dep] = {
+            installTime: `${result.time.toFixed(2)}s`,
+            diskSpace: formatSize(result.space),
+          };
+        }
+
+        displayImpactTable(impactData, totalInstallTime, totalDiskSpace);
+
+        if (parentInfo) {
+          const yearlyData = await getYearlyDownloads(parentInfo.name);
+          const stats = calculateImpactStats(
+            totalDiskSpace,
+            totalInstallTime,
+            parentInfo.downloads,
+            yearlyData,
+          );
+
+          const impactTable = new CliTable({
+            head: ['Period', 'Downloads', 'Data Transfer', 'Install Time'],
+            colWidths: [15, 15, 15, 15],
+            wordWrap: true,
+            style: { head: ['cyan'], border: ['grey'] },
+          });
+
+          if (stats.day) {
+            impactTable.push([
+              'Day',
+              `~${formatNumber(stats.day.downloads)}`,
+              formatSize(stats.day.diskSpace),
+              formatTime(stats.day.installTime),
+            ]);
+          }
+
+          if (stats.monthly) {
+            // Ensure monthly stats are only added when not a full year
+            impactTable.push([
+              'Month',
+              formatNumber(stats.monthly.downloads),
+              formatSize(stats.monthly.diskSpace),
+              formatTime(stats.monthly.installTime),
+            ]);
+          }
+
+          if (
+            yearlyData?.monthsFetched === 12 &&
+            stats.yearly &&
+            stats.yearly.downloads > 0
+          ) {
+            impactTable.push([
+              'Last 12 months',
+              formatNumber(stats.yearly.downloads),
+              formatSize(stats.yearly.diskSpace),
+              formatTime(stats.yearly.installTime),
+            ]);
+          } else if (
+            yearlyData?.monthsFetched &&
+            yearlyData.monthsFetched > 1 &&
+            stats[`last_${yearlyData.monthsFetched}_months`] &&
+            (stats[`last_${yearlyData.monthsFetched}_months`]?.downloads ?? 0) >
+              0
+          ) {
+            const label = `Last ${yearlyData.monthsFetched} months`;
+            const periodStats =
+              stats[`last_${yearlyData.monthsFetched}_months`];
+            impactTable.push([
+              label,
+              formatNumber(periodStats?.downloads ?? 0),
+              formatSize(periodStats?.diskSpace ?? 0),
+              formatTime(periodStats?.installTime ?? 0),
+            ]);
+          }
+
+          console.log(impactTable.toString());
+
+          console.log(
+            `\n${chalk.yellow(
+              'Note:',
+            )} These results depend on your system's capabilities.\nTry a multi-architecture analysis at ${chalk.bold('https://github.com/chiefmikey/depsweep/analysis')}`,
+          );
+        } else {
+          console.log(
+            chalk.yellow('\nInsufficient download data to calculate impact.'),
+          );
+        }
       }
 
       if (options.verbose) {
@@ -1302,11 +1690,13 @@ async function main(): Promise<void> {
         }
 
         // Validate before using in execSync
-        unusedDependencies = unusedDependencies.filter(isValidPackageName);
+        unusedDependencies = unusedDependencies.filter((dep) =>
+          isValidPackageName(dep),
+        );
 
         if (unusedDependencies.length > 0) {
           try {
-            safeExecSync([packageManager, 'uninstall', ...unusedDependencies], {
+            safeExecSync(uninstallCommand.split(' '), {
               stdio: 'inherit',
               cwd: projectDirectory,
               timeout: 300_000,
