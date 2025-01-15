@@ -28,12 +28,19 @@ jobs:
           node-version: 'latest'
           cache: 'npm'
 
-      - name: Install deps
-        run: npm i
+      - name: Clone input package
+        run: git clone ${{ github.event.inputs.package_name }}
+
+      - name: Install dependencies in cloned package
+        run: |
+          cd ${{ github.event.inputs.package_name }}
+          npm install
 
       - name: Run depsweep
         run: |
-          npx depsweep@latest impact ${{ github.event.inputs.package_name }} > output.txt
+          cd ${{ github.event.inputs.package_name }}
+          npx depsweep --measure-impact > ../output.txt
+          cd ..
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
