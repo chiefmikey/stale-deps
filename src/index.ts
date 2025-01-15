@@ -46,7 +46,7 @@ const PROTECTED_PACKAGES = new Set([
 // Common string literals
 const CLI_STRINGS = {
   PROGRESS_FORMAT:
-    'Analyzing dependencies |{bar}| {currentDeps}/{totalDeps} Dependencies | {currentFiles}/{totalFiles} Files | {percentage}%',
+    'Analyzing dependencies |{bar}| {currentFiles}/{totalFiles} Files | {currentDeps}/{totalDeps} Dependencies | {percentage}%',
   BAR_COMPLETE: '\u2588',
   BAR_INCOMPLETE: '\u2591',
   CLI_NAME: 'depsweep',
@@ -93,11 +93,11 @@ const MESSAGES = {
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:',
   noChangesMade: '\nNo changes made',
-  promptRemove: '\nDo you want to remove these dependencies? (y/N) ',
+  promptRemove: '\nDo you want to remove these unused dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
   diskSpace: 'Unpacked Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
-  measuringInstallTime: 'Measuring...',
+  measuringImpact: 'Measuring impact...',
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
   analysisComplete: 'Analysis complete',
@@ -1058,7 +1058,7 @@ async function getParentPackageDownloads(packageJsonPath: string): Promise<{
   }
 }
 
-interface ExtendedImpactStats {
+interface measureImpactStats {
   daily?: {
     downloads: number;
     diskSpace: number;
@@ -1174,7 +1174,7 @@ async function getYearlyDownloads(
   return { total: totalDownloads, monthsFetched, startDate };
 }
 
-function calculateExtendedStats(
+function calculateImpactStats(
   diskSpace: number,
   installTime: number,
   monthlyDownloads: number | null,
@@ -1183,8 +1183,8 @@ function calculateExtendedStats(
     monthsFetched: number;
     startDate: string;
   } | null,
-): ExtendedImpactStats {
-  const stats: ExtendedImpactStats = {};
+): measureImpactStats {
+  const stats: measureImpactStats = {};
 
   if (!yearlyData) {
     return stats;
@@ -1243,7 +1243,7 @@ function displayImpactTable(
 ) {
   const table = new CliTable({
     head: ['Package', 'Install Time', 'Disk Space'],
-    colWidths: [20, 15, 15],
+    colWidths: [31, 15, 15],
     wordWrap: true,
     style: {
       head: ['cyan'],
@@ -1297,10 +1297,7 @@ async function main(): Promise<void> {
       .option('-a, --aggressive', 'allow removal of protected packages')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
-      .option(
-        '--extended-impact',
-        'run measure plus usage stats from npm for extended impact analysis',
-      )
+      .option('-m, --measure-impact', 'measure unused dependency impact')
       .addHelpText('after', CLI_STRINGS.EXAMPLE_TEXT);
 
     program.exitOverride(() => {
@@ -1481,10 +1478,10 @@ async function main(): Promise<void> {
         );
       }
 
-      if (!options.extendedImpact) {
+      if (!options.measureImpact) {
         console.log(
           chalk.blue(
-            '\nRun the command again with the --extended-impact flag for a detailed impact report.\n',
+            '\nRun the command again with the -m, --measure-impact flag for a detailed impact analysis.\n',
           ),
         );
       }
@@ -1498,10 +1495,10 @@ async function main(): Promise<void> {
         errors?: string[];
       }[] = [];
 
-      if (options.extendedImpact) {
+      if (options.measureImpact) {
         console.log('');
         const measureSpinner = ora({
-          text: MESSAGES.measuringInstallTime,
+          text: MESSAGES.measuringImpact,
           spinner: 'dots',
         }).start();
         activeSpinner = measureSpinner;
@@ -1522,7 +1519,7 @@ async function main(): Promise<void> {
             });
 
             const progress = `[${index + 1}/${totalPackages}]`;
-            measureSpinner.text = `${MESSAGES.measuringInstallTime} ${chalk.blue(progress)}`;
+            measureSpinner.text = `${MESSAGES.measuringImpact} ${chalk.blue(progress)}`;
           } catch (error) {
             console.error(`Error measuring ${dep}:`, error);
           }
@@ -1530,6 +1527,12 @@ async function main(): Promise<void> {
 
         measureSpinner.succeed(
           `${MESSAGES.measureComplete} ${chalk.blue(`[${totalPackages}/${totalPackages}]`)}`,
+        );
+
+        const parentInfo = await getParentPackageDownloads(packageJsonPath);
+
+        console.log(
+          `\n${chalk.bold('Impact Analysis Report:')} ${chalk.yellow(parentInfo?.name)}`,
         );
 
         // Create a table for detailed results
@@ -1546,30 +1549,20 @@ async function main(): Promise<void> {
 
         displayImpactTable(impactData, totalInstallTime, totalDiskSpace);
 
-        console.log('');
-        const extendedSpinner = ora({
-          text: 'Measuring extended impact...',
-          spinner: 'dots',
-        }).start();
-        activeSpinner = extendedSpinner;
-
-        const parentInfo = await getParentPackageDownloads(packageJsonPath);
         if (parentInfo) {
           const yearlyData = await getYearlyDownloads(parentInfo.name);
-          const stats = calculateExtendedStats(
+          const stats = calculateImpactStats(
             totalDiskSpace,
             totalInstallTime,
             parentInfo.downloads,
             yearlyData,
           );
 
-          // Update spinner text and stop it before showing results
-          extendedSpinner.text = 'Measuring complete';
-          extendedSpinner.stopAndPersist({ symbol: chalk.green('✔') });
-
           const impactTable = new CliTable({
             head: ['Period', 'Downloads', 'Data Transfer', 'Install Time'],
-            style: { head: ['cyan'] },
+            colWidths: [15, 15, 15, 15],
+            wordWrap: true,
+            style: { head: ['cyan'], border: ['grey'] },
           });
 
           if (stats.day) {
@@ -1620,9 +1613,6 @@ async function main(): Promise<void> {
             ]);
           }
 
-          console.log(
-            `${chalk.bold('Extended Impact Analysis for')} ${chalk.yellow(parentInfo.name)}:`,
-          );
           console.log(impactTable.toString());
 
           console.log(
@@ -1631,8 +1621,6 @@ async function main(): Promise<void> {
             )} These results depend on your system's capabilities.\nTry a multi-architecture analysis at ${chalk.bold('https://github.com/chiefmikey/depsweep/analysis')}`,
           );
         } else {
-          extendedSpinner.text = 'Measuring complete';
-          extendedSpinner.stopAndPersist({ symbol: chalk.green('✔') });
           console.log(
             chalk.yellow('\nInsufficient download data to calculate impact.'),
           );
