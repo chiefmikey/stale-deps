@@ -50,10 +50,9 @@ const CLI_STRINGS = {
   BAR_COMPLETE: '\u2588',
   BAR_INCOMPLETE: '\u2591',
   CLI_NAME: 'depsweep',
-  CLI_VERSION: '1.0.0',
   CLI_DESCRIPTION:
-    'CLI tool that identifies and removes unused npm dependencies',
-  EXAMPLE_TEXT: '\nExample:\n  $ depsweep --verbose',
+    'Automated intelligent dependency cleanup and impact analysis report',
+  EXAMPLE_TEXT: '\nExample:\n  $ depsweep -v --measure-impact',
 } as const;
 
 const FILE_PATTERNS = {
@@ -93,7 +92,7 @@ const MESSAGES = {
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:',
   noChangesMade: '\nNo changes made',
-  promptRemove: '\n\nDo you want to remove these unused dependencies? (y/N) ',
+  promptRemove: '\nDo you want to remove these unused dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
   diskSpace: 'Unpacked Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
@@ -1243,7 +1242,7 @@ function displayImpactTable(
 ) {
   const table = new CliTable({
     head: ['Package', 'Install Time', 'Disk Space'],
-    colWidths: [31, 15, 15],
+    colWidths: [29, 25, 25],
     wordWrap: true,
     style: {
       head: ['cyan'],
@@ -1273,6 +1272,15 @@ async function main(): Promise<void> {
     process.on('SIGINT', cleanup);
     process.on('SIGTERM', cleanup);
 
+    const packageJsonPath = await findClosestPackageJson(process.cwd());
+
+    const projectDirectory = path.dirname(packageJsonPath);
+    const context = await getPackageContext(packageJsonPath);
+
+    const packageJsonString =
+      (await fs.readFile(packageJsonPath, 'utf8')) || '{}';
+    const packageJson = JSON.parse(packageJsonString);
+
     const program = new Command();
 
     // Configure program output and prevent exit
@@ -1286,18 +1294,16 @@ async function main(): Promise<void> {
     program
       .name(CLI_STRINGS.CLI_NAME)
       .usage('[options]')
-      .version(CLI_STRINGS.CLI_VERSION)
       .description(CLI_STRINGS.CLI_DESCRIPTION)
+
       .option('-v, --verbose', 'display detailed usage information')
-      .option('-i, --ignore <patterns...>', 'patterns to ignore')
-      .option(
-        '-s, --safe <deps...>',
-        'additional dependencies to protect from removal',
-      )
-      .option('-a, --aggressive', 'allow removal of protected packages')
-      .option('--dry-run', 'show what would be removed without making changes')
-      .option('--no-progress', 'disable progress bar')
+      .option('-a, --aggressive', 'allow removal of protected dependencies')
+      .option('-s, --safe <deps>', 'dependencies that will not be removed')
+      .option('-i, --ignore <paths>', 'patterns to ignore during scanning')
       .option('-m, --measure-impact', 'measure unused dependency impact')
+      .option('-d, --dry-run', 'run without making changes')
+      .option('-n, --no-progress', 'disable the progress bar')
+      .version(packageJson.version, '--version', 'display installed version')
       .addHelpText('after', CLI_STRINGS.EXAMPLE_TEXT);
 
     program.exitOverride(() => {
@@ -1318,11 +1324,6 @@ async function main(): Promise<void> {
       program.outputHelp();
       return;
     }
-
-    const packageJsonPath = await findClosestPackageJson(process.cwd());
-
-    const projectDirectory = path.dirname(packageJsonPath);
-    const context = await getPackageContext(packageJsonPath);
 
     console.log(chalk.cyan(MESSAGES.title));
     console.log(chalk.bold('Dependency Analysis\n'));
@@ -1478,14 +1479,6 @@ async function main(): Promise<void> {
         );
       }
 
-      if (!options.measureImpact) {
-        console.log(
-          chalk.blue(
-            '\nRun with the -m, --measure-impact flag for a detailed impact analysis',
-          ),
-        );
-      }
-
       let totalInstallTime = 0;
       let totalDiskSpace = 0;
       const installResults: {
@@ -1494,6 +1487,38 @@ async function main(): Promise<void> {
         space: number;
         errors?: string[];
       }[] = [];
+
+      if (options.verbose) {
+        const table = new CliTable({
+          head: ['Dependency', 'Usage'],
+          wordWrap: true,
+          colWidths: [30, 50],
+          style: {
+            head: ['cyan'],
+            border: ['grey'],
+          },
+        });
+
+        for (const dep of dependencies) {
+          const usage = dependencyUsage[dep];
+          const supportInfo = typePackageSupport[dep]
+            ? ` (supports "${typePackageSupport[dep]}")`
+            : '';
+          let label = '';
+          if (safeSet.has(dep)) {
+            label = options.safe?.includes(dep) ? '[safe]' : '[protected]';
+          }
+          table.push([
+            `${dep} ${chalk.blue(label)}`,
+            usage.length > 0
+              ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
+              : chalk.yellow(`Not used${supportInfo}`),
+          ]);
+        }
+
+        console.log();
+        console.log(table.toString());
+      }
 
       if (options.measureImpact) {
         console.log('');
@@ -1560,7 +1585,7 @@ async function main(): Promise<void> {
 
           const impactTable = new CliTable({
             head: ['Period', 'Downloads', 'Data Transfer', 'Install Time'],
-            colWidths: [15, 15, 15, 15],
+            colWidths: [18, 20, 20, 20],
             wordWrap: true,
             style: { head: ['cyan'], border: ['grey'] },
           });
@@ -1627,32 +1652,12 @@ async function main(): Promise<void> {
         }
       }
 
-      if (options.verbose) {
-        const table = new CliTable({
-          head: ['Dependency', 'Usage'],
-          wordWrap: true,
-          colWidths: [30, 70],
-        });
-
-        for (const dep of dependencies) {
-          const usage = dependencyUsage[dep];
-          const supportInfo = typePackageSupport[dep]
-            ? ` (supports "${typePackageSupport[dep]}")`
-            : '';
-          let label = '';
-          if (safeSet.has(dep)) {
-            label = options.safe?.includes(dep) ? '[safe]' : '[protected]';
-          }
-          table.push([
-            `${dep} ${chalk.blue(label)}`,
-            usage.length > 0
-              ? usage.map((u) => path.relative(projectDirectory, u)).join('\n')
-              : chalk.yellow(`Not used${supportInfo}`),
-          ]);
-        }
-
-        console.log();
-        console.log(table.toString());
+      if (!options.measureImpact) {
+        console.log(
+          chalk.blue(
+            '\nRun with the -m, --measure-impact flag for a detailed impact analysis\n',
+          ),
+        );
       }
 
       if (options.dryRun) {
