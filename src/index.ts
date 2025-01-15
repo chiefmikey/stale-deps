@@ -778,20 +778,17 @@ async function processFilesInParallel(
 
   const results: string[] = [];
   let totalErrors = 0;
-  let processedFiles = 0;
 
   const processFile = async (
     file: string,
   ): Promise<{ result: string | null; hasError: boolean }> => {
     try {
       const used = await isDependencyUsedInFile(dependency, file, context);
-      processedFiles++;
       return { result: used ? file : null, hasError: false };
     } catch (error) {
       console.error(
         chalk.red(`Error processing ${file}: ${(error as Error).message}`),
       );
-      processedFiles++;
       return { result: null, hasError: true };
     }
   };
@@ -861,65 +858,17 @@ function cleanup(): void {
   }
 }
 
-// Add a helper function to fetch package size from npm
-async function getPackageSizeFromNpm(
-  packageName: string,
-): Promise<number | null> {
-  try {
-    // Minimal approach: fetch from npm registry
-    const response = await fetch(`https://registry.npmjs.org/${packageName}`);
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    // Some packages store metadata in "dist.unpackedSize" for the latest version
-    const versions = (data as { versions: Record<string, any> }).versions || {};
-    if (typeof data === 'object' && data !== null && 'dist-tags' in data) {
-      const latest = (data as { 'dist-tags': { latest: string } })['dist-tags']
-        ?.latest;
-      if (latest && versions[latest]?.dist?.unpackedSize) {
-        return versions[latest].dist.unpackedSize;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Measure install time by running a subprocess
-async function measureInstallTime(package_: string): Promise<number> {
-  if (!isValidPackageName(package_)) {
-    throw new Error(`Invalid package name: ${package_}`);
-  }
-
-  const start = Date.now();
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('npm', ['install', package_], {
-      stdio: 'ignore',
-      cwd: process.cwd(),
-      timeout: 300_000,
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Install process exited with code ${code}.`));
-    });
-  });
-  return (Date.now() - start) / 1000;
-}
-
 // Add this validation function
 function isValidPackageName(name: string): boolean {
   return FILE_PATTERNS.PACKAGE_NAME_REGEX.test(name);
 }
 
 // Recursively compute dir size for accurate disk usage stats
-function getDirectorySize(dir: string): number {
+function getDirectorySize(directory: string): number {
   let total = 0;
-  const files = readdirSync(dir, { withFileTypes: true });
+  const files = readdirSync(directory, { withFileTypes: true });
   for (const f of files) {
-    const fullPath = path.join(dir, f.name);
+    const fullPath = path.join(directory, f.name);
     total += f.isDirectory()
       ? getDirectorySize(fullPath)
       : statSync(fullPath).size;
@@ -1154,8 +1103,8 @@ async function getYearlyDownloads(
       currentDate.getMonth() - index + 1,
       0,
     );
-    const startString = start.toISOString().split('T')[0];
-    const endString = end.toISOString().split('T')[0];
+    const [startString] = start.toISOString().split('T');
+    const [endString] = end.toISOString().split('T');
 
     try {
       const response = await fetch(
@@ -1217,7 +1166,7 @@ async function getYearlyDownloads(
       currentDate.getMonth() - validMonthsAgo,
       1,
     );
-    startDate = trimmedStart.toISOString().split('T')[0];
+    [startDate] = trimmedStart.toISOString().split('T');
   }
 
   // Sum total
@@ -1532,30 +1481,13 @@ async function main(): Promise<void> {
         );
       }
 
-      let totalSize = 0;
-      const sizePromises = unusedDependencies.map(async (dep) => {
-        const size = await getPackageSizeFromNpm(dep);
-        return size ?? 0;
-      });
-      const sizeResults = await Promise.all(sizePromises);
-      totalSize = sizeResults.reduce(
-        (accumulator, value) => accumulator + value,
-        0,
-      );
-
-      // Additional Impact Reporting
-      const removedCount = unusedDependencies.length;
-      const diskSpaceSaved = formatSize(totalSize);
-      const carbonReduction = (removedCount * 0.002).toFixed(3);
-
-      console.log(chalk.bold('\nImpact:'));
-      console.log(
-        `${MESSAGES.dependenciesRemoved} ${chalk.bold(removedCount)}`,
-      );
-      console.log(`${MESSAGES.diskSpace} ${chalk.bold(diskSpaceSaved)}`);
-      console.log(
-        `${MESSAGES.carbonFootprint} ${chalk.bold(`~${carbonReduction}`, 'kg', 'CO2e')}`,
-      );
+      if (!options.extendedImpact) {
+        console.log(
+          chalk.blue(
+            '\nRun the command again with the --extended-impact flag for a detailed impact report.\n',
+          ),
+        );
+      }
 
       let totalInstallTime = 0;
       let totalDiskSpace = 0;
@@ -1575,7 +1507,6 @@ async function main(): Promise<void> {
         activeSpinner = measureSpinner;
 
         const totalPackages = unusedDependencies.length;
-        // ...existing code measuring each dependency...
         for (let index = 0; index < totalPackages; index++) {
           const dep = unusedDependencies[index];
           try {
@@ -1695,6 +1626,12 @@ async function main(): Promise<void> {
             `${chalk.bold('Extended Impact Analysis for')} ${chalk.yellow(parentInfo.name)}:`,
           );
           console.log(impactTable.toString());
+
+          console.log(
+            `\n${chalk.yellow(
+              'Note:',
+            )} These results depend on your system's capabilities.\nTry a multi-architecture analysis at ${chalk.bold('https://github.com/chiefmikey/depsweep/analysis')}`,
+          );
         } else {
           extendedSpinner.text = 'Measuring complete';
           extendedSpinner.stopAndPersist({ symbol: chalk.green('✔') });
@@ -1767,11 +1704,13 @@ async function main(): Promise<void> {
         }
 
         // Validate before using in execSync
-        unusedDependencies = unusedDependencies.filter(isValidPackageName);
+        unusedDependencies = unusedDependencies.filter((dep) =>
+          isValidPackageName(dep),
+        );
 
         if (unusedDependencies.length > 0) {
           try {
-            safeExecSync([packageManager, 'uninstall', ...unusedDependencies], {
+            safeExecSync(uninstallCommand.split(' '), {
               stdio: 'inherit',
               cwd: projectDirectory,
               timeout: 300_000,
