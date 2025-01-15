@@ -1,6 +1,6 @@
 # DepSweep 🧹
 
-> Automated intelligent dependency cleanup
+> Automated intelligent dependency cleanup and impact analysis report
 
 [![npm version](https://img.shields.io/npm/v/depsweep.svg)](https://www.npmjs.com/package/depsweep)
 [![Downloads](https://img.shields.io/npm/dm/depsweep.svg)](https://www.npmjs.com/package/depsweep)
@@ -14,7 +14,7 @@
 - 🚀 **Modern JS/TS Support**: Supports the latest JavaScript and TypeScript
   features.
 - 📦 **Package Manager Compatibility**: Works with npm, yarn, and pnpm.
-- 🛡️ **Safe Mode**: Prevents accidental removal of specified packages.
+- 🛡️ **Safe Mode**: Prevents accidental removal of specified dependencies.
 - 🏗️ **Monorepo Support**: Seamlessly handles projects within monorepos.
 - ⚡ **Efficient Processing**: Utilizes parallel processing for faster analysis.
 - 🧩 **Config File Scanning**: Detects dependencies used in configuration files.
@@ -29,7 +29,7 @@
 - ✅ TypeScript and JSX
 - ✅ Dynamic Imports
 - ✅ Configuration Files
-- ✅ Workspace Packages
+- ✅ Workspace Dependencies
 - ✅ Binary File Detection
 - ✅ Monorepos
 
@@ -65,12 +65,13 @@ pnpm add -g depsweep
 
 ```txt
   -v, --verbose          Display detailed usage information
+  -a, --aggressive       Allow removal of protected dependencies
+  -s, --safe <deps>      Dependencies that will not be removed
   -i, --ignore <paths>   Patterns to ignore during scanning
-  -s, --safe <deps>      Enable safe mode to protect specified packages
-  -a, --aggressive       Allow removal of protected packages
   -m, --measure-impact   Measure unused dependency impact
-  --dry-run              Show what would be removed without making changes
-  --no-progress          Disable the progress bar
+  -d, --dry-run              Run without making changes
+  -n, --no-progress          Disable the progress bar
+  --version              Display installed version
   -h, --help             Display help information
 ```
 
@@ -80,7 +81,7 @@ pnpm add -g depsweep
 # Run with verbose output
 depsweep --verbose
 
-# Specify packages to protect
+# Specify dependencies to protect
 depsweep --safe react react-dom
 
 # Ignore specific directories or files
@@ -90,12 +91,12 @@ depsweep -i "test/**" "scripts/**"
 depsweep --dry-run
 ```
 
-## Protected Packages
+## Protected Dependencies
 
-A [list of protected packages](src/index.ts#L33) are ignored by default to
+A [list of protected dependencies](src/index.ts#L33) are ignored by default to
 prevent accidental removal. Use the `-a, --aggressive` flag to override this
 protection. Combine with the `-s, --safe` flag to enable removal for only some
-protected packages.
+protected dependencies.
 
 ## Contributing
 
