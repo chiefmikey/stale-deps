@@ -68,7 +68,7 @@ pnpm add -g depsweep
   -i, --ignore <paths>   Patterns to ignore during scanning
   -s, --safe <deps>      Enable safe mode to protect specified packages
   -a, --aggressive       Allow removal of protected packages
-  -m, --measure          Measure unused dependency install time
+  -m, --measure-impact   Measure unused dependency impact
   --dry-run              Show what would be removed without making changes
   --no-progress          Disable the progress bar
   -h, --help             Display help information
