@@ -879,15 +879,15 @@ function getDirectorySize(directory: string): number {
 // Add a helper function to format bytes into human-readable strings
 function formatSize(bytes: number): string {
   if (bytes >= 1e12) {
-    return `${(bytes / 1e12).toFixed(2)} TB`;
+    return `${(bytes / 1e12).toFixed(2)} ${chalk.blue('TB')}`;
   } else if (bytes >= 1e9) {
-    return `${(bytes / 1e9).toFixed(2)} GB`;
+    return `${(bytes / 1e9).toFixed(2)} ${chalk.blue('GB')}`;
   } else if (bytes >= 1e6) {
-    return `${(bytes / 1e6).toFixed(2)} MB`;
+    return `${(bytes / 1e6).toFixed(2)} ${chalk.blue('MB')}`;
   } else if (bytes >= 1e3) {
-    return `${(bytes / 1e3).toFixed(2)} KB`;
+    return `${(bytes / 1e3).toFixed(2)} ${chalk.blue('KB')}`;
   }
-  return `${bytes} Bytes`;
+  return `${bytes} ${chalk.blue('Bytes')}`;
 }
 
 // Add this validation at the top with other constants
@@ -1021,13 +1021,13 @@ async function getDownloadStatsFromNpm(
 
 function formatTime(seconds: number): string {
   if (seconds >= 86_400) {
-    return `${(seconds / 86_400).toFixed(2)} Days`;
+    return `${(seconds / 86_400).toFixed(2)} ${chalk.blue('Days')}`;
   } else if (seconds >= 3600) {
-    return `${(seconds / 3600).toFixed(2)} Hours`;
+    return `${(seconds / 3600).toFixed(2)} ${chalk.blue('Hours')}`;
   } else if (seconds >= 60) {
-    return `${(seconds / 60).toFixed(2)} Minutes`;
+    return `${(seconds / 60).toFixed(2)} ${chalk.blue('Minutes')}`;
   }
-  return `${seconds.toFixed(2)}s`;
+  return `${seconds.toFixed(2)} ${chalk.blue('Seconds')}`;
 }
 
 function formatNumber(n: number): string {
@@ -1252,13 +1252,14 @@ function displayImpactTable(
   });
 
   for (const [package_, data] of Object.entries(impactData)) {
-    table.push([package_, data.installTime, data.diskSpace]);
+    const numericTime = Number.parseFloat(data.installTime);
+    table.push([package_, formatTime(numericTime), data.diskSpace]);
   }
 
   // Add totals row with separator
   table.push([
     chalk.bold('Total'),
-    chalk.bold(`${totalInstallTime.toFixed(2)}s`),
+    chalk.bold(formatTime(totalInstallTime)),
     chalk.bold(formatSize(totalDiskSpace)),
   ]);
 
@@ -1294,7 +1295,6 @@ async function main(): Promise<void> {
         'additional dependencies to protect from removal',
       )
       .option('-a, --aggressive', 'allow removal of protected packages')
-      .option('-m, --measure', 'measure saved installation time')
       .option('--dry-run', 'show what would be removed without making changes')
       .option('--no-progress', 'disable progress bar')
       .option(
@@ -1498,7 +1498,7 @@ async function main(): Promise<void> {
         errors?: string[];
       }[] = [];
 
-      if (options.measure || options.extendedImpact) {
+      if (options.extendedImpact) {
         console.log('');
         const measureSpinner = ora({
           text: MESSAGES.measuringInstallTime,
@@ -1545,9 +1545,7 @@ async function main(): Promise<void> {
         }
 
         displayImpactTable(impactData, totalInstallTime, totalDiskSpace);
-      }
 
-      if (options.extendedImpact) {
         console.log('');
         const extendedSpinner = ora({
           text: 'Measuring extended impact...',
