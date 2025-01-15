@@ -93,7 +93,7 @@ const MESSAGES = {
   noUnusedDependencies: 'No unused dependencies found.',
   unusedFound: 'Unused dependencies found:',
   noChangesMade: '\nNo changes made',
-  promptRemove: '\nDo you want to remove these unused dependencies? (y/N) ',
+  promptRemove: '\n\nDo you want to remove these unused dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
   diskSpace: 'Unpacked Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
@@ -1481,7 +1481,7 @@ async function main(): Promise<void> {
       if (!options.measureImpact) {
         console.log(
           chalk.blue(
-            '\nRun the command again with the -m, --measure-impact flag for a detailed impact analysis.\n',
+            '\nRun with the -m, --measure-impact flag for a detailed impact analysis',
           ),
         );
       }
