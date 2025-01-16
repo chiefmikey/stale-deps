@@ -58,6 +58,8 @@ jobs:
             cat ../error.log
             echo "Package contents:"
             ls -R node_modules/${{ github.event.inputs.package_name }}
+            echo "Output log:"
+            cat ../output.txt
             exit 1
           }
           echo '```' >> ../$GITHUB_STEP_SUMMARY
