@@ -1,0 +1,50 @@
+name: Impact Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_manager:
+        description: 'Package manager'
+        required: true
+        type: choice
+        options:
+          - npm
+        default: 'npm'
+      package_name:
+        description: 'NPM package to analyze (e.g. express)'
+        required: true
+        type: string
+      branch:
+        description: 'Branch of depsweep to use'
+        required: false
+        default: 'main'
+
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout depsweep code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Build depsweep
+        run: |
+          npm install
+          npm run build
+
+      - name: Create test directory
+        run: |
+          mkdir test-package
+          cd test-package
+          npm init -y
+          npm install ${{ github.event.inputs.package_name }}
+
+      - name: Run depsweep
+        run: |
+          cd test-package/node_modules/${{ github.event.inputs.package_name }}
+          node ../../../../dist/index.js --measure-impact . > ../../../../output.txt
+          cd ../../../../
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
