@@ -14,52 +14,42 @@ on:
         description: 'Package Name'
         required: true
         type: string
+      verbose:
+        description: 'Verbose'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   impact:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout depsweep code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup
         uses: actions/setup-node@v3
-        with:
-          node-version: '18'
 
-      - name: Build depsweep
+      - name: Build
         run: |
           npm install
           npm run build
-
-      - name: Verify build output
-        run: ls -l dist
+          ls -l dist
 
       - name: Create test directory
         run: |
-          mkdir test-package
-          cd test-package
+          mkdir impact-report
+          cd impact-report
           npm init -y
           npm install ${{ github.event.inputs.package_name }} --verbose
-
-      - name: Debug install
-        run: ls -l test-package/node_modules/${{ github.event.inputs.package_name }}
+          ls -l impact-report/node_modules/${{ github.event.inputs.package_name }}
 
       - name: Run depsweep
-        working-directory: test-package
+        working-directory: impact-report
         run: |
-          echo "Node version: $(node --version)"
-          echo "NPM version: $(npm --version)"
-          pwd
-          ls -la
-          ls -la ../dist
-          node --trace-warnings ../dist/index.js --measure-impact 2>../error.log > ../output.txt || {
+          node --trace-warnings ../dist/index.js --measure-impact ${{ github.event.inputs.verbose && '--verbose' || '' }} 2>../error.log > ../output.txt || {
             echo "Error running depsweep. Error log:"
             cat ../error.log
-            echo "Package contents:"
-            ls -R node_modules/${{ github.event.inputs.package_name }}
-            echo "Output log:"
-            cat ../output.txt
             exit 1
           }
           echo '```' >> $GITHUB_STEP_SUMMARY
