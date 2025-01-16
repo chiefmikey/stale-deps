@@ -84,15 +84,15 @@ const DEPENDENCY_PATTERNS = {
 // Replace existing MESSAGES constant
 const MESSAGES = {
   title: 'DepSweep 🧹',
-  noPackageJson: 'No package.json found.',
-  monorepoDetected: '\nMonorepo detected. Using root package.json.',
-  monorepoWorkspaceDetected: '\nMonorepo workspace package detected.',
+  noPackageJson: 'No package.json found',
+  monorepoDetected: '\nMonorepo detected, using root package.json',
+  monorepoWorkspaceDetected: '\nMonorepo workspace package detected',
   analyzingDependencies: 'Analyzing dependencies...',
   fatalError: '\nFatal error:',
-  noUnusedDependencies: 'No unused dependencies found.',
+  noUnusedDependencies: 'No unused dependencies found',
   unusedFound: 'Unused dependencies found:',
-  noChangesMade: '\nNo changes made',
-  promptRemove: '\nDo you want to remove these unused dependencies? (y/N) ',
+  noChangesMade: 'No changes made',
+  promptRemove: 'Do you want to remove these unused dependencies? (y/N) ',
   dependenciesRemoved: 'Dependencies:',
   diskSpace: 'Unpacked Disk Space:',
   carbonFootprint: 'Carbon Footprint:',
@@ -100,7 +100,7 @@ const MESSAGES = {
   measureComplete: 'Measurement complete',
   installTime: 'Total Install Time:',
   analysisComplete: 'Analysis complete',
-  signalCleanup: '\n{0} received. Cleaning up...',
+  signalCleanup: '\n{0} received, cleaning up...',
   unexpected: '\nUnexpected error:',
 } as const;
 
@@ -1466,7 +1466,7 @@ async function main(): Promise<void> {
           chalk.blue(`- ${dep} [${isSafeListed ? 'safe' : 'protected'}]`),
         );
       }
-      console.log(chalk.blue(MESSAGES.noChangesMade));
+      console.log('\n\n', chalk.blue(MESSAGES.noChangesMade));
     } else {
       console.log(chalk.bold(MESSAGES.unusedFound));
       for (const dep of unusedDependencies) {
@@ -1647,7 +1647,7 @@ async function main(): Promise<void> {
           );
         } else {
           console.log(
-            chalk.yellow('\nInsufficient download data to calculate impact.'),
+            chalk.yellow('\nInsufficient download data to calculate impact'),
           );
         }
       }
@@ -1655,10 +1655,12 @@ async function main(): Promise<void> {
       if (!options.measureImpact) {
         console.log(
           chalk.blue(
-            '\nRun with the -m, --measure-impact flag for a detailed impact analysis\n',
+            '\nRun with the -m, --measure-impact flag to output a detailed impact analysis report',
           ),
         );
       }
+
+      console.log('\n');
 
       if (options.dryRun) {
         console.log(chalk.blue(MESSAGES.noChangesMade));
