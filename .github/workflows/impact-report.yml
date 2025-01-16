@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       package_manager:
-        description: 'Package manager'
+        description: 'Package Manager'
         required: true
         type: choice
         options:
           - npm
         default: 'npm'
       package_name:
-        description: 'NPM package to analyze (e.g. express)'
+        description: 'Package Name'
         required: true
         type: string
 
@@ -36,6 +36,9 @@ jobs:
           cd test-package
           npm init -y
           npm install ${{ github.event.inputs.package_name }}
+
+      - name: Debug install
+        run: ls -l test-package/node_modules/${{ github.event.inputs.package_name }}
 
       - name: Run depsweep
         run: |
