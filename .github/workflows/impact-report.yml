@@ -53,7 +53,7 @@ jobs:
           pwd
           ls -la
           ls -la ../dist
-          node --trace-warnings ../dist/index.js --measure-impact="node_modules/${{ github.event.inputs.package_name }}" 2>../error.log > ../output.txt || {
+          node --trace-warnings ../dist/index.js --measure-impact 2>../error.log > ../output.txt || {
             echo "Error running depsweep. Error log:"
             cat ../error.log
             echo "Package contents:"
