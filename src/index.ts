@@ -36,28 +36,10 @@ import { FILE_PATTERNS } from './constants/filePatterns';
 import { MESSAGES } from './constants/messages';
 import { PACKAGE_MANAGERS } from './constants/packageManagers';
 import { PROTECTED_PACKAGES } from './constants/protectedPackages';
+import type { DependencyContext } from './interfaces/dependencyContext';
+import type { PackageJson } from './interfaces/packageJson';
+import type { WorkspaceInfo } from './interfaces/workspaceInfo';
 
-// Update interface for package.json structure
-interface PackageJson {
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
-  workspaces?: string[] | { packages: string[] };
-  scripts?: Record<string, string>;
-}
-
-// Add interface for dependency context
-interface DependencyContext {
-  scripts?: Record<string, string>;
-  configs?: Record<string, any>;
-}
-
-// Add interface for workspace info
-interface WorkspaceInfo {
-  root: string;
-  packages: string[];
-}
 const traverseFunction = ((traverse as any).default || traverse) as (
   ast: any,
   options: any,
