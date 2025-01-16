@@ -1,4 +1,4 @@
-name: Impact Report
+name: Impact Analysis Report
 
 on:
   workflow_dispatch:
@@ -22,6 +22,7 @@ on:
 
 jobs:
   impact:
+    name: Create Report
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,7 +37,7 @@ jobs:
           npm run build
           ls dist
 
-      - name: Create test directory
+      - name: Install
         run: |
           mkdir impact-report
           cd impact-report
@@ -44,7 +45,7 @@ jobs:
           npm install ${{ github.event.inputs.package_name }} --verbose
           ls node_modules/${{ github.event.inputs.package_name }}
 
-      - name: Run depsweep
+      - name: Run
         working-directory: impact-report
         run: |
           node --trace-warnings ../dist/index.js --measure-impact --ignore ../package.json ${{ github.event.inputs.verbose && '--verbose' || '' }} 2>../error.log > ../output.txt || {
