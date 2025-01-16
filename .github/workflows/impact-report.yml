@@ -36,9 +36,7 @@ jobs:
 
       - name: Run depsweep
         run: |
-          cd test-package/node_modules/${{ github.event.inputs.package_name }}
-          node ../../../../dist/index.js --measure-impact . > ../../../../output.txt
-          cd ../../../../
+          node dist/index.js --measure-impact test-package/node_modules/${{ github.event.inputs.package_name }} > output.txt
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
