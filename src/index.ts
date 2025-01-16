@@ -30,79 +30,12 @@ import micromatch from 'micromatch';
 import ora, { type Ora } from 'ora';
 import shellEscape from 'shell-escape';
 
-/*
- * Essential packages that should never be removed automatically,
- * unless the `-a, --aggressive` flag is used.
- ******************************************************************/
-const PROTECTED_PACKAGES = new Set([
-  'typescript',
-  '@types/node',
-  'tslib',
-  'prettier',
-  'eslint',
-]);
-/******************************************************************/
-
-// Common string literals
-const CLI_STRINGS = {
-  PROGRESS_FORMAT:
-    'Analyzing dependencies |{bar}| {currentFiles}/{totalFiles} Files | {currentDeps}/{totalDeps} Dependencies | {percentage}%',
-  BAR_COMPLETE: '\u2588',
-  BAR_INCOMPLETE: '\u2591',
-  CLI_NAME: 'depsweep',
-  CLI_DESCRIPTION:
-    'Automated intelligent dependency cleanup and impact analysis report',
-  EXAMPLE_TEXT: '\nExample:\n  $ depsweep -v --measure-impact',
-} as const;
-
-const FILE_PATTERNS = {
-  PACKAGE_JSON: 'package.json',
-  YARN_LOCK: 'yarn.lock',
-  PNPM_LOCK: 'pnpm-lock.yaml',
-  NODE_MODULES: 'node_modules',
-  CONFIG_REGEX: /\.(config|rc)(\.|\b)/,
-  PACKAGE_NAME_REGEX: /^[\w./@-]+$/,
-} as const;
-
-const PACKAGE_MANAGERS = {
-  NPM: 'npm',
-  YARN: 'yarn',
-  PNPM: 'pnpm',
-  COMMANDS: {
-    INSTALL: 'install',
-    UNINSTALL: 'uninstall',
-    REMOVE: 'remove',
-  },
-} as const;
-
-const DEPENDENCY_PATTERNS = {
-  TYPES_PREFIX: '@types/',
-  DYNAMIC_IMPORT_BASE: String.raw`import\s*\(\s*['"]`,
-  DYNAMIC_IMPORT_END: String.raw`['"]\s*\)`,
-} as const;
-
-// Replace existing MESSAGES constant
-const MESSAGES = {
-  title: 'DepSweep 🧹',
-  noPackageJson: 'No package.json found',
-  monorepoDetected: '\nMonorepo detected, using root package.json',
-  monorepoWorkspaceDetected: '\nMonorepo workspace package detected',
-  analyzingDependencies: 'Analyzing dependencies...',
-  fatalError: '\nFatal error:',
-  noUnusedDependencies: 'No unused dependencies found',
-  unusedFound: 'Unused dependencies found:',
-  noChangesMade: 'No changes made',
-  promptRemove: 'Do you want to remove these unused dependencies? (y/N) ',
-  dependenciesRemoved: 'Dependencies:',
-  diskSpace: 'Unpacked Disk Space:',
-  carbonFootprint: 'Carbon Footprint:',
-  measuringImpact: 'Measuring impact...',
-  measureComplete: 'Measurement complete',
-  installTime: 'Total Install Time:',
-  analysisComplete: 'Analysis complete',
-  signalCleanup: '\n{0} received, cleaning up...',
-  unexpected: '\nUnexpected error:',
-} as const;
+import { CLI_STRINGS } from './constants/cliStrings';
+import { DEPENDENCY_PATTERNS } from './constants/dependencyPatterns';
+import { FILE_PATTERNS } from './constants/filePatterns';
+import { MESSAGES } from './constants/messages';
+import { PACKAGE_MANAGERS } from './constants/packageManagers';
+import { PROTECTED_PACKAGES } from './constants/protectedPackages';
 
 // Update interface for package.json structure
 interface PackageJson {
