@@ -1,12 +1,14 @@
 # DepSweep 🧹
 
-> Automated intelligent dependency cleanup and impact analysis report
+> Automated dependency cleanup and impact analysis report
 
 [![npm version](https://img.shields.io/npm/v/depsweep.svg)](https://www.npmjs.com/package/depsweep)
 [![Downloads](https://img.shields.io/npm/dm/depsweep.svg)](https://www.npmjs.com/package/depsweep)
 [![License](https://img.shields.io/npm/l/depsweep.svg)](https://github.com/chiefmikey/depsweep/blob/main/LICENSE)
 
 ## Features
+
+Automatically detect and remove unused dependencies
 
 - 🔍 **Smart Detection**: Analyzes your codebase to find unused dependencies.
 - 🎯 **AST-Based Analysis**: Uses Abstract Syntax Tree parsing for precise
