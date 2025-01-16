@@ -22,6 +22,11 @@ jobs:
       - name: Checkout depsweep code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
       - name: Build depsweep
         run: |
           npm install
@@ -35,7 +40,7 @@ jobs:
           mkdir test-package
           cd test-package
           npm init -y
-          npm install ${{ github.event.inputs.package_name }}
+          npm install ${{ github.event.inputs.package_name }} --verbose
 
       - name: Debug install
         run: ls -l test-package/node_modules/${{ github.event.inputs.package_name }}
@@ -43,11 +48,16 @@ jobs:
       - name: Run depsweep
         working-directory: test-package
         run: |
+          echo "Node version: $(node --version)"
+          echo "NPM version: $(npm --version)"
           pwd
           ls -la
           ls -la ../dist
-          node ../dist/index.js --measure-impact "node_modules/${{ github.event.inputs.package_name }}" > ../output.txt || {
-            echo "Error running depsweep"
+          node --trace-warnings ../dist/index.js --measure-impact "node_modules/${{ github.event.inputs.package_name }}" 2>../error.log > ../output.txt || {
+            echo "Error running depsweep. Error log:"
+            cat ../error.log
+            echo "Package contents:"
+            ls -R node_modules/${{ github.event.inputs.package_name }}
             exit 1
           }
           echo '```' >> ../$GITHUB_STEP_SUMMARY
