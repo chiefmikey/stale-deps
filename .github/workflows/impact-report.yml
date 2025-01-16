@@ -27,6 +27,9 @@ jobs:
           npm install
           npm run build
 
+      - name: Verify build output
+        run: ls -l dist
+
       - name: Create test directory
         run: |
           mkdir test-package
