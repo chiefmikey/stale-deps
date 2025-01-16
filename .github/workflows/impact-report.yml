@@ -41,9 +41,15 @@ jobs:
         run: ls -l test-package/node_modules/${{ github.event.inputs.package_name }}
 
       - name: Run depsweep
+        working-directory: test-package
         run: |
-          cd test-package
-          node ../dist/index.js --measure-impact node_modules/${{ github.event.inputs.package_name }} > ../output.txt
+          pwd
+          ls -la
+          ls -la ../dist
+          node ../dist/index.js --measure-impact "node_modules/${{ github.event.inputs.package_name }}" > ../output.txt || {
+            echo "Error running depsweep"
+            exit 1
+          }
           echo '```' >> ../$GITHUB_STEP_SUMMARY
           cat ../output.txt >> ../$GITHUB_STEP_SUMMARY
           echo '```' >> ../$GITHUB_STEP_SUMMARY
