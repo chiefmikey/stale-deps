@@ -62,6 +62,6 @@ jobs:
             cat ../output.txt
             exit 1
           }
-          echo '```' >> ../$GITHUB_STEP_SUMMARY
-          cat ../output.txt >> ../$GITHUB_STEP_SUMMARY
-          echo '```' >> ../$GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat ../output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
