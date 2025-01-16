@@ -34,7 +34,7 @@ jobs:
         run: |
           npm install
           npm run build
-          ls -l dist
+          ls dist
 
       - name: Create test directory
         run: |
@@ -42,12 +42,12 @@ jobs:
           cd impact-report
           npm init -y
           npm install ${{ github.event.inputs.package_name }} --verbose
-          ls -l impact-report/node_modules/${{ github.event.inputs.package_name }}
+          ls node_modules/${{ github.event.inputs.package_name }}
 
       - name: Run depsweep
         working-directory: impact-report
         run: |
-          node --trace-warnings ../dist/index.js --measure-impact ${{ github.event.inputs.verbose && '--verbose' || '' }} 2>../error.log > ../output.txt || {
+          node --trace-warnings ../dist/index.js --measure-impact --ignore ../package.json ${{ github.event.inputs.verbose && '--verbose' || '' }} 2>../error.log > ../output.txt || {
             echo "Error running depsweep. Error log:"
             cat ../error.log
             exit 1
