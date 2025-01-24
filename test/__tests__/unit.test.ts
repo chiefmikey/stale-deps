@@ -7,9 +7,14 @@ import {
   it,
   jest,
 } from '@jest/globals';
-
 import { findUp } from 'find-up';
 import ora from 'ora';
+
+import {
+  getSourceFiles,
+  getDependencies,
+  findClosestPackageJson,
+} from '../../src/utils.js';
 
 // Mock modules
 jest.mock('chalk');
@@ -22,13 +27,7 @@ jest.mock('find-up');
 // Mock findUp to return our fake package.json path
 jest.mocked(findUp).mockResolvedValue('/fake/path/package.json');
 
-import {
-  getSourceFiles,
-  findClosestPackageJson,
-  getDependencies,
-} from '../index';
-
-const oraMock = ora as jest.MockedFunction<typeof ora>;
+const oraMock = jest.mocked(ora);
 
 describe('getSourceFiles', () => {
   beforeAll(() => {
@@ -53,7 +52,7 @@ describe('getSourceFiles', () => {
 
     expect(Array.isArray(files)).toBe(true);
     expect(files).toHaveLength(2);
-    expect(files).toEqual([
+    expect(files).toStrictEqual([
       '/fake/path/src/index.ts',
       '/fake/path/src/utils.ts',
     ]);

@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import path from 'node:path';
+
 import { beforeAll, describe, expect, it } from '@jest/globals';
 
 describe('e2E Test', () => {
