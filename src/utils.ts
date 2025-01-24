@@ -1,3 +1,5 @@
+/* eslint-disable unicorn/prefer-json-parse-buffer */
+import { readdirSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -19,6 +21,229 @@ import type {
   PackageJson,
   WorkspaceInfo,
 } from './interfaces.js';
+
+import { customSort } from './index.js';
+
+interface DependencyInfo {
+  usedInFiles: string[];
+  requiredByPackages: Set<string>;
+  hasSubDependencyUsage: boolean;
+}
+
+const depInfoCache = new Map<string, DependencyInfo>();
+
+function normalizeTypesPackage(typesPackage: string): string {
+  // Remove @types/ prefix
+  const basePackage = typesPackage.replace('@types/', '');
+  // Convert double underscore to @
+  // e.g., babel__traverse -> @babel/traverse
+  if (basePackage.includes('__')) {
+    return `@${basePackage.replace('__', '/')}`;
+  }
+  // Handle regular packages
+  return basePackage.includes('/') ? `@${basePackage}` : basePackage;
+}
+
+interface ProgressOptions {
+  onProgress?: (
+    filePath: string,
+    subdepIndex?: number,
+    totalSubdeps?: number,
+  ) => void;
+  totalAnalysisSteps: number;
+}
+
+export async function getDependencyInfo(
+  dependency: string,
+  context: DependencyContext,
+  sourceFiles: string[],
+  topLevelDependencies: Set<string>, // Add this parameter
+  progressOptions?: ProgressOptions,
+): Promise<DependencyInfo> {
+  // Check cache
+  const cacheKey = `${context.projectRoot}:${dependency}`;
+  if (depInfoCache.has(cacheKey)) {
+    return depInfoCache.get(cacheKey)!;
+  }
+
+  const info: DependencyInfo = {
+    usedInFiles: [],
+    requiredByPackages: new Set(),
+    hasSubDependencyUsage: false,
+  };
+
+  // Special handling for @types packages
+  if (dependency.startsWith('@types/')) {
+    const basePackage = normalizeTypesPackage(dependency);
+    const tsConfig = await getTSConfig(context.projectRoot);
+
+    // Check if this is a compiler-required types package
+    if (basePackage === 'node' && hasTSFiles(sourceFiles)) {
+      info.requiredByPackages.add('typescript');
+      return info;
+    }
+
+    // Check if the base package is installed
+    if (topLevelDependencies.has(basePackage)) {
+      info.requiredByPackages.add(basePackage);
+    }
+
+    // Check if any TypeScript files use types from this package
+    let subdepIndex = 0;
+    for (const file of sourceFiles) {
+      subdepIndex++;
+      if (
+        (file.endsWith('.ts') || file.endsWith('.tsx')) &&
+        ((await isDependencyUsedInFile(dependency, file, context)) ||
+          (await isDependencyUsedInFile(basePackage, file, context)))
+      ) {
+        info.usedInFiles.push(file);
+      }
+      progressOptions?.onProgress?.(file, subdepIndex);
+      await new Promise((res) => setImmediate(res)); // Tiny pause
+    }
+
+    // If we have TypeScript files and tsconfig includes this in types/typeRoots, mark as used
+    if (tsConfig && hasTSFiles(sourceFiles)) {
+      const { types = [], typeRoots = [] } = tsConfig.compilerOptions || {};
+      if (
+        types.includes(basePackage) ||
+        typeRoots.some((root: string) => root.includes(basePackage))
+      ) {
+        info.requiredByPackages.add('typescript');
+      }
+    }
+
+    return info;
+  }
+
+  // Count subdependencies from the dependency graph
+  const subdeps = context.dependencyGraph?.get(dependency) || new Set<string>();
+  const subdepsArray = [...subdeps]; // Convert to array for indexed access
+  const totalSubdeps = subdepsArray.length;
+
+  // Check direct file usage
+  for (const file of sourceFiles) {
+    // Check subdependencies first
+    if (subdepsArray.length > 0) {
+      for (const [index, subdep] of subdepsArray.entries()) {
+        if (await isDependencyUsedInFile(subdep, file, context)) {
+          info.hasSubDependencyUsage = true;
+        }
+        // Report each subdep check
+        progressOptions?.onProgress?.(file, index + 1, totalSubdeps);
+      }
+    } else {
+      // If no subdeps, still call progress
+      progressOptions?.onProgress?.(file);
+    }
+
+    if (await isDependencyUsedInFile(dependency, file, context)) {
+      info.usedInFiles.push(file);
+    }
+  }
+
+  // Check package dependencies
+  const nodeModulesPath = path.join(context.projectRoot, 'node_modules');
+  try {
+    const packages = new Set<string>();
+    const entries = readdirSync(nodeModulesPath, { withFileTypes: true });
+
+    // Get list of package directories once
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('@')) {
+        const scopedDir = path.join(nodeModulesPath, entry.name);
+        const scopedEntries = readdirSync(scopedDir, { withFileTypes: true });
+        for (const sub of scopedEntries) {
+          if (sub.isDirectory()) {
+            packages.add(path.join(entry.name, sub.name));
+          }
+        }
+      } else {
+        packages.add(entry.name);
+      }
+    }
+
+    // Bulk read package.json files
+    const packageJsonPromises = [...packages].map(async (package_) => {
+      try {
+        const data = await fs.readFile(
+          path.join(nodeModulesPath, package_, 'package.json'),
+          'utf8', // Add utf8 encoding to get string instead of Buffer
+        );
+        return { pkg: package_, data: JSON.parse(data) };
+      } catch {
+        return null;
+      }
+    });
+
+    const packageJsonResults = await Promise.all(packageJsonPromises);
+
+    // Build dependency graph to track chains
+    const dependencyGraph = new Map<string, Set<string>>();
+
+    // First pass: build direct dependency relationships
+    for (const result of packageJsonResults) {
+      if (!result) continue;
+      const { pkg, data } = result;
+      const allDeps = {
+        ...data.dependencies,
+        ...data.peerDependencies,
+        ...data.optionalDependencies,
+      };
+
+      // Track what each package requires
+      dependencyGraph.set(pkg, new Set(Object.keys(allDeps)));
+    }
+
+    // Find all packages that eventually require our dependency
+    const findTopLevelDependents = (dep: string): Set<string> => {
+      const dependents = new Set<string>();
+
+      for (const [package_, deps] of dependencyGraph.entries()) {
+        if (deps.has(dep)) {
+          // If this is a top-level dependency, add it
+          if (topLevelDependencies.has(package_)) {
+            dependents.add(package_);
+          } else {
+            // Otherwise, find what requires this package
+            const parentDeps = findTopLevelDependents(package_);
+            for (const parentDep of parentDeps) {
+              dependents.add(parentDep);
+            }
+          }
+        }
+      }
+
+      return dependents;
+    };
+
+    // Get all packages that require this dependency (directly or indirectly)
+    const allRequiringPackages = findTopLevelDependents(dependency);
+    info.requiredByPackages = allRequiringPackages;
+  } catch {
+    // Ignore errors
+  }
+
+  // Cache the result
+  depInfoCache.set(cacheKey, info);
+  return info;
+}
+
+async function getTSConfig(projectRoot: string): Promise<any> {
+  try {
+    const tsConfigPath = path.join(projectRoot, 'tsconfig.json');
+    const content = await fs.readFile(tsConfigPath, 'utf8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+function hasTSFiles(files: string[]): boolean {
+  return files.some((file) => file.endsWith('.ts') || file.endsWith('.tsx'));
+}
 
 // Add workspace detection
 export async function getWorkspaceInfo(
@@ -127,12 +352,17 @@ export async function getDependencies(
     ? Object.keys(packageJson.optionalDependencies)
     : [];
 
-  return [
+  const allDependencies = [
     ...dependencies,
     ...devDependencies,
     ...peerDependencies,
     ...optionalDependencies,
   ];
+
+  // Sort all dependencies using custom sort function
+  allDependencies.sort(customSort);
+
+  return allDependencies;
 }
 
 export async function getPackageContext(
@@ -140,6 +370,15 @@ export async function getPackageContext(
 ): Promise<DependencyContext> {
   const projectDirectory = path.dirname(packageJsonPath);
   const configs: Record<string, any> = {};
+  const dependencyGraph = new Map<string, Set<string>>(); // Re-added dependencyGraph
+
+  // Populate dependencyGraph as needed
+  // Example: Populate with existing dependencies
+  const dependencies = await getDependencies(packageJsonPath);
+  for (const dep of dependencies) {
+    // Example: Initialize with empty sets or actual subdependencies
+    dependencyGraph.set(dep, new Set<string>());
+  }
 
   // Read all files in the project
   const allFiles = await getSourceFiles(projectDirectory);
@@ -171,6 +410,8 @@ export async function getPackageContext(
       'package.json': packageJson,
       ...configs,
     },
+    projectRoot: path.dirname(packageJsonPath),
+    dependencyGraph, // Included dependencyGraph
   };
 }
 
@@ -269,4 +510,14 @@ export async function processFilesInParallel(
   }
 
   return results;
+}
+
+export function findSubDependencies(
+  dependency: string,
+  context: DependencyContext,
+): string[] {
+  // Retrieve sub-dependencies from the dependencyGraph
+  return context.dependencyGraph?.get(dependency)
+    ? [...context.dependencyGraph.get(dependency)!]
+    : [];
 }

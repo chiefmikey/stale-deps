@@ -17,7 +17,7 @@
     "noImplicitAny": true,
     "removeComments": true,
     "preserveConstEnums": true,
-    "outDir": "dist",
+    "outDir": "./dist",
     "declaration": true,
     "types": [
       "node",
@@ -30,17 +30,18 @@
     },
     "baseUrl": ".",
     "resolveJsonModule": true,
-    "allowArbitraryExtensions": true
+    "allowArbitraryExtensions": true,
+    "rootDir": "."
   },
   "include": [
     "src/**/*",
-    "jest.config.*.ts"
+    "test/**/*",
+    "jest.config.*.ts",
+    "src"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "src/__tests__/**/*",
-    "src/__mocks__/**/*",
     "jest.config.*.ts"
   ],
   "ts-node": {

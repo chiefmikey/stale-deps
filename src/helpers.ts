@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-json-parse-buffer */
 import { execSync, spawn } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -16,6 +17,7 @@ import type {
 } from '@babel/types';
 import chalk from 'chalk';
 import CliTable from 'cli-table3';
+import { glob } from 'glob';
 import { isBinaryFileSync } from 'isbinaryfile';
 import micromatch from 'micromatch';
 import fetch from 'node-fetch';
@@ -27,7 +29,14 @@ import {
   PACKAGE_MANAGERS,
   RAW_CONTENT_PATTERNS,
 } from './constants.js';
-import type { DependencyContext } from './interfaces.js';
+import type {
+  DependencyContext,
+  ProgressOptions,
+  DependencyInfo,
+} from './interfaces.js';
+import { findSubDependencies } from './utils.js';
+
+import { customSort } from './index.js';
 
 export function isConfigFile(filePath: string): boolean {
   const filename = path.basename(filePath).toLowerCase();
@@ -515,7 +524,7 @@ export function safeExecSync(
 
   const [packageManager, ...arguments_] = command;
 
-  if (!(packageManager in PACKAGE_MANAGERS)) {
+  if (!Object.values(PACKAGE_MANAGERS).includes(packageManager)) {
     throw new Error(`Invalid package manager: ${packageManager}`);
   }
 
@@ -645,12 +654,17 @@ export async function getDownloadStatsFromNpm(
 
 export async function getParentPackageDownloads(
   packageJsonPath: string,
-): Promise<{ name: string; downloads: number } | null> {
+): Promise<{
+  name: string;
+  downloads: number;
+  repository?: { url: string };
+  homepage?: string;
+} | null> {
   try {
     const packageJsonString =
       (await fs.readFile(packageJsonPath, 'utf8')) || '{}';
     const packageJson = JSON.parse(packageJsonString);
-    const { name } = packageJson;
+    const { name, repository, homepage } = packageJson;
     if (!name) return null;
 
     const downloads = await getDownloadStatsFromNpm(name);
@@ -660,7 +674,7 @@ export async function getParentPackageDownloads(
       );
       return null;
     }
-    return { name, downloads };
+    return { name, downloads, repository, homepage };
   } catch {
     return null;
   }
@@ -834,7 +848,11 @@ export function displayImpactTable(
     },
   });
 
-  for (const [package_, data] of Object.entries(impactData)) {
+  const sortedImpactData = Object.entries(impactData).sort(([a], [b]) =>
+    customSort(a, b),
+  );
+
+  for (const [package_, data] of sortedImpactData) {
     const numericTime = Number.parseFloat(data.installTime);
     table.push([package_, formatTime(numericTime), data.diskSpace]);
   }
