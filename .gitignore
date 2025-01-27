@@ -5,4 +5,3 @@ node_modules
 dist
 coverage/
 .jest/
-dist/src/__mocks__/
