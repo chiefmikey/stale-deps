@@ -182,13 +182,19 @@ async function main(): Promise<void> {
     let progressBar: cliProgress.SingleBar | null = null;
     if (options.progress) {
       progressBar = new cliProgress.SingleBar({
-        format: 'Dependency Analysis |{bar}| {currentDep}',
+        format: CLI_STRINGS.PROGRESS_FORMAT,
         barCompleteChar: CLI_STRINGS.BAR_COMPLETE,
         barIncompleteChar: CLI_STRINGS.BAR_INCOMPLETE,
+        hideCursor: true,
+        clearOnComplete: false,
+        forceRedraw: true,
+        linewrap: false,
       });
       activeProgressBar = progressBar;
       progressBar.start(100, 0, {
-        currentDep: '',
+        currentDeps: 0,
+        totalDeps: dependencies.length,
+        dep: '',
       });
     }
 
@@ -213,7 +219,9 @@ async function main(): Promise<void> {
         progressBar.update(
           (analysisStepsProcessed / totalAnalysisSteps) * 100,
           {
-            currentDep: `[${totalDepsProcessed}/${dependencies.length}] ${currentDependency}`,
+            currentDeps: totalDepsProcessed,
+            totalDeps: dependencies.length,
+            dep: currentDependency,
           },
         );
       }
@@ -253,9 +261,10 @@ async function main(): Promise<void> {
     }
 
     if (progressBar) {
-      // Force final update to ensure 100% is shown
       progressBar.update(100, {
-        currentDep: `[${totalDepsProcessed}/${dependencies.length}] ${chalk.green('✔')}`,
+        currentDeps: dependencies.length,
+        totalDeps: dependencies.length,
+        dep: chalk.green('✓'),
       });
       progressBar.stop();
     }
