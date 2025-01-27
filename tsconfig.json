@@ -30,7 +30,8 @@
     },
     "baseUrl": ".",
     "resolveJsonModule": true,
-    "allowArbitraryExtensions": true
+    "allowArbitraryExtensions": true,
+    "rootDir": "./src"
   },
   "include": [
     "src/**/*",
