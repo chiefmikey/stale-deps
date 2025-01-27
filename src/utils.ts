@@ -53,6 +53,62 @@ interface ProgressOptions {
   totalAnalysisSteps: number;
 }
 
+function getFrameworkInfo(context: DependencyContext): {
+  name: string;
+  corePackage: string;
+  devDependencies: string[];
+} | null {
+  const packageJson = context.configs?.['package.json'];
+  if (!packageJson) return null;
+
+  const deps = packageJson.dependencies || {};
+  const developmentDeps = packageJson.devDependencies || {};
+  const allDeps = { ...deps, ...developmentDeps };
+
+  // Framework detection patterns
+  const frameworks = [
+    {
+      name: 'angular',
+      corePackage: '@angular/core',
+      devDependencies: [
+        '@angular-builders/',
+        '@angular-devkit/',
+        '@angular/cli',
+        '@webcomponents/custom-elements',
+      ],
+    },
+    {
+      name: 'react',
+      corePackage: 'react',
+      devDependencies: [
+        'react-scripts',
+        '@testing-library/react',
+        'react-app-rewired',
+      ],
+    },
+    // Add more frameworks as needed
+  ];
+
+  for (const framework of frameworks) {
+    if (allDeps[framework.corePackage]) {
+      return framework;
+    }
+  }
+
+  return null;
+}
+
+function isFrameworkDevelopmentDependency(
+  dependency: string,
+  frameworkInfo: ReturnType<typeof getFrameworkInfo>,
+): boolean {
+  if (!frameworkInfo) return false;
+
+  return frameworkInfo.devDependencies.some(
+    (prefix) => dependency.startsWith(prefix) || dependency === prefix,
+  );
+}
+
 export async function getDependencyInfo(
   dependency: string,
   context: DependencyContext,
@@ -71,6 +127,16 @@ export async function getDependencyInfo(
     requiredByPackages: new Set(),
     hasSubDependencyUsage: false,
   };
+
+  // Framework-specific handling
+  const frameworkInfo = getFrameworkInfo(context);
+  if (
+    frameworkInfo &&
+    isFrameworkDevelopmentDependency(dependency, frameworkInfo)
+  ) {
+    info.requiredByPackages.add(frameworkInfo.corePackage);
+    return info;
+  }
 
   // Special handling for @types packages
   if (dependency.startsWith('@types/')) {
