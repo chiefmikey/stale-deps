@@ -30,19 +30,34 @@ export const CLI_STRINGS = {
   EXAMPLE_TEXT: '\nExample:\n  $ depsweep -v --measure-impact',
 };
 
+export const FRAMEWORK_PATTERNS = {
+  ANGULAR: {
+    CORE: '@angular/core',
+    PATTERNS: ['@angular/*', '@angular-*', '@webcomponents/*'],
+    DEV_DEPS: ['@angular-builders/*', '@angular-devkit/*', '@angular/cli'],
+  },
+  REACT: {
+    CORE: 'react',
+    PATTERNS: ['react-*', '@testing-library/react*', '@types/react*'],
+    DEV_DEPS: ['react-scripts', 'react-app-rewired'],
+  },
+  VUE: {
+    CORE: 'vue',
+    PATTERNS: ['vue-*', '@vue/*', '@nuxt/*'],
+    DEV_DEPS: ['@vue/cli-service', '@vue/cli-plugin-*'],
+  },
+};
+
 export const RAW_CONTENT_PATTERNS = new Map([
   ['webpack', ['webpack.*', 'webpack-*']],
   ['babel', ['babel.*', '@babel/*']],
   ['eslint', ['eslint.*', '@eslint/*']],
   ['jest', ['jest.*', '@jest/*']],
   ['typescript', ['ts-*', '@typescript-*']],
-  ['rollup', ['rollup.*', 'rollup-*']],
-  ['esbuild', ['esbuild.*', '@esbuild/*']],
-  ['vite', ['vite.*', '@vitejs/*']],
-  ['next', ['next.*', '@next/*']],
-  ['vue', ['vue.*', '@vue/*', '@nuxt/*']],
-  ['react', ['react.*', '@types/react*']],
-  ['svelte', ['svelte.*', '@sveltejs/*']],
+  [
+    'bundler',
+    ['rollup.*', 'rollup-*', 'esbuild.*', '@esbuild/*', 'vite.*', '@vitejs/*'],
+  ],
 ]);
 
 export const DEPENDENCY_PATTERNS = {
