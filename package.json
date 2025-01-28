@@ -9,7 +9,7 @@
     "npm": ">=7.0.0"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc && node scripts/prepare-dist.js",
+    "build": "rm -rf dist && tsc",
     "major": "npm version major; cd dist && npm version major",
     "minor": "npm version minor; cd dist && npm version minor",
     "ncu": "ncu -u; cd dist && ncu -u;",
@@ -63,11 +63,10 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md",
-    "package.json"
+    "README.md"
   ],
   "bin": {
-    "depsweep": "dist/index.js"
+    "depsweep": "./dist/index.js"
   },
   "homepage": "https://github.com/chiefmikey/depsweep",
   "repository": {
@@ -120,5 +119,6 @@
   "cpu": [
     "x64",
     "arm64"
-  ]
+  ],
+  "preferGlobal": true
 }
